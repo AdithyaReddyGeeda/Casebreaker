@@ -1,16 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGameStore } from "@/lib/store";
 import { getRoom, getEvidence } from "@/lib/cases/harlow-manor";
 import type { EvidenceId } from "@/lib/cases/harlow-manor";
 
 export default function RoomScreen() {
-  const { selectedRoom, goTo, searchRoom, searchedRooms, discoveredEvidence } = useGameStore();
+  const { selectedRoom, goTo, searchRoom, searchedRooms, registerEvidenceExamination } =
+    useGameStore();
   const [revealed, setRevealed] = useState<EvidenceId[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceId | null>(null);
+
+  useEffect(() => {
+    if (selectedEvidence) registerEvidenceExamination(selectedEvidence);
+  }, [selectedEvidence, registerEvidenceExamination]);
 
   if (!selectedRoom) {
     goTo("manor");

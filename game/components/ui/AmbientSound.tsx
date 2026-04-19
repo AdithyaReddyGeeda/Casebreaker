@@ -33,6 +33,7 @@ export default function AmbientSound() {
   const heartGainRef = useRef<GainNode | null>(null);
   const clockIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scheduleHeartbeatRef = useRef<(bpm: number) => void>(() => {});
   const initializedRef = useRef(false);
 
   const initAudio = useCallback(() => {
@@ -139,8 +140,14 @@ export default function AmbientSound() {
     dub.stop(ctx.currentTime + 0.42);
     // Schedule next beat
     const msPerBeat = (60 / bpm) * 1000;
-    heartIntervalRef.current = setTimeout(() => scheduleHeartbeat(bpm), msPerBeat) as unknown as ReturnType<typeof setInterval>;
+    heartIntervalRef.current = setTimeout(() => {
+      scheduleHeartbeatRef.current(bpm);
+    }, msPerBeat) as unknown as ReturnType<typeof setInterval>;
   }, []);
+
+  useEffect(() => {
+    scheduleHeartbeatRef.current = scheduleHeartbeat;
+  }, [scheduleHeartbeat]);
 
   // Rain: fade based on screen
   useEffect(() => {

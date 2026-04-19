@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { MysteryServiceProvider } from "./MysteryServiceProvider";
 
 export const metadata: Metadata = {
   title: "CaseBreaker AI — The Harlow Manor Affair",
@@ -9,7 +10,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="h-full">
-      <body className="h-full overflow-hidden">{children}</body>
+      <body className="h-full overflow-hidden">
+        <MysteryServiceProvider>{children}</MysteryServiceProvider>
+      </body>
     </html>
   );
 }

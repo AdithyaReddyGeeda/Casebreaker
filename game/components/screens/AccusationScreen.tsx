@@ -1,19 +1,74 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/store";
-import { HARLOW_MANOR, getSuspect } from "@/lib/cases/harlow-manor";
+import { getEvidence, getSuspect } from "@/lib/cases/harlow-manor";
+import { getDiscoveredEvidence } from "@/lib/evidence/sampleEvidence";
 import type { SuspectId } from "@/lib/cases/harlow-manor";
 
 export default function AccusationScreen() {
-  const { goTo, submitAccusation, discoveredEvidence } = useGameStore();
+  const {
+    goTo,
+    submitAccusation,
+    discoveredEvidence,
+    evidence,
+    activeSuspects,
+    activeEvidence,
+    canonicalCaseFacts,
+    setEvidenceForAccusation,
+  } = useGameStore();
+  const victimName = canonicalCaseFacts.victim.name;
   const [accused, setAccused] = useState<SuspectId | null>(null);
   const [reasoning, setReasoning] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
+
+  const discoveredBoardEvidence = useMemo(
+    () => getDiscoveredEvidence(evidence, discoveredEvidence),
+    [discoveredEvidence, evidence]
+  );
+  const accusationEvidence = useMemo(
+    () => discoveredBoardEvidence.filter((item) => item.selectedForAccusation),
+    [discoveredBoardEvidence]
+  );
+  const matchingKeyEvidence = useMemo(
+    () =>
+      accused
+        ? discoveredBoardEvidence.filter((item) => item.isKey && item.contradicts.includes(accused))
+        : [],
+    [accused, discoveredBoardEvidence]
+  );
+  const hasCorrectKeyEvidence = useMemo(
+    () =>
+      accused
+        ? accusationEvidence.some((item) => item.isKey && item.contradicts.includes(accused))
+        : false,
+    [accusationEvidence, accused]
+  );
+  const missingKeyEvidence = useMemo(
+    () =>
+      matchingKeyEvidence.filter(
+        (item) => !accusationEvidence.some((selected) => selected.id === item.id)
+      ),
+    [accusationEvidence, matchingKeyEvidence]
+  );
 
   function handleAccuse() {
     if (!accused || !reasoning.trim()) return;
+    if (accusationEvidence.length < 1 || accusationEvidence.length > 3) {
+      setValidationMessage("Select between 1 and 3 evidence items for the accusation.");
+      return;
+    }
+    if (!hasCorrectKeyEvidence) {
+      setValidationMessage(
+        missingKeyEvidence.length > 0
+          ? `Missing key evidence: ${missingKeyEvidence.map((item) => item.title).join(", ")}.`
+          : "No key evidence currently contradicts this suspect."
+      );
+      return;
+    }
+    setValidationMessage(null);
     setConfirming(true);
   }
 
@@ -49,6 +104,20 @@ export default function AccusationScreen() {
         You have gathered the evidence. Now name the killer.
       </div>
 
+      {validationMessage && (
+        <div
+          className="border px-4 py-3 text-xs leading-relaxed"
+          style={{
+            background: "rgba(244,67,54,.04)",
+            borderColor: "rgba(244,67,54,.22)",
+            color: "#D9A08E",
+            fontFamily: "Georgia, serif",
+          }}
+        >
+          {validationMessage}
+        </div>
+      )}
+
       {/* Evidence summary */}
       <div className="border border-[#1E2A38] p-4" style={{ background: "rgba(255,255,255,.01)" }}>
         <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-2">Evidence in Hand</div>
@@ -57,7 +126,7 @@ export default function AccusationScreen() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {discoveredEvidence.map((id) => {
-              const ev = HARLOW_MANOR.evidence.find((e) => e.id === id)!;
+              const ev = activeEvidence.find((e) => e.id === id) ?? getEvidence(id);
               return (
                 <span
                   key={id}
@@ -72,11 +141,68 @@ export default function AccusationScreen() {
         )}
       </div>
 
+      <div className="border border-[#1E2A38] p-4" style={{ background: "rgba(255,255,255,.01)" }}>
+        <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-3">Accusation Evidence</div>
+        {discoveredBoardEvidence.length === 0 ? (
+          <div className="text-xs text-[#334455] italic">No board evidence available yet.</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {discoveredBoardEvidence.map((item) => {
+              const selected = item.selectedForAccusation;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setEvidenceForAccusation(item.id, !selected)}
+                  className="border p-3 text-left transition-all"
+                  style={{
+                    background: selected ? "rgba(212,168,67,.08)" : "rgba(255,255,255,.02)",
+                    borderColor: item.isKey
+                      ? "rgba(212,168,67,.24)"
+                      : selected
+                        ? "rgba(212,168,67,.2)"
+                        : "rgba(255,255,255,.07)",
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold text-[#C8D0DC]">{item.title}</div>
+                      <div className="mt-1 text-[9px] uppercase tracking-[2px] text-[#556677]">
+                        {item.category}
+                      </div>
+                    </div>
+                    {item.isKey && (
+                      <span className="text-[9px] uppercase tracking-[2px] text-[#D4A843]">Key</span>
+                    )}
+                  </div>
+                  {selected && (
+                    <div className="mt-2 text-[9px] uppercase tracking-[2px] text-[#D4A843]">
+                      Selected for accusation
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-3 text-[10px] text-[#667788] italic">
+          Select between 1 and 3 pieces of evidence.
+        </div>
+
+        {accused && missingKeyEvidence.length > 0 && (
+          <div className="mt-3 text-[10px] text-[#D9A08E] leading-relaxed">
+            Missing key evidence for this accusation: {missingKeyEvidence.map((item) => item.title).join(", ")}
+          </div>
+        )}
+      </div>
+
       {/* Suspect selection */}
       <div>
-        <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-3">Who killed Edmund Harlow?</div>
+        <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-3">
+          Who killed {victimName}?
+        </div>
         <div className="grid grid-cols-3 gap-2">
-          {HARLOW_MANOR.suspects.map((s) => (
+          {activeSuspects.map((s) => (
             <motion.button
               key={s.id}
               onClick={() => setAccused(s.id)}
@@ -163,7 +289,7 @@ export default function AccusationScreen() {
             <p className="text-sm text-[#C8D0DC] leading-relaxed text-center mb-6">
               You are about to formally accuse{" "}
               <strong className="text-[#D4A843]">{getSuspect(accused).name}</strong> of the murder
-              of Edmund Harlow. This cannot be undone.
+              of {victimName}. This cannot be undone.
             </p>
             <div className="flex gap-3">
               <button

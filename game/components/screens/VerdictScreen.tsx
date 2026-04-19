@@ -5,7 +5,7 @@ import { useGameStore } from "@/lib/store";
 import { HARLOW_MANOR, getSuspect } from "@/lib/cases/harlow-manor";
 
 export default function VerdictScreen() {
-  const { accusation, discoveredEvidence, resetGame, goTo } = useGameStore();
+  const { accusation, discoveredEvidence, resetGame, goTo, resolvedVerdict } = useGameStore();
 
   if (!accusation) {
     goTo("manor");
@@ -14,12 +14,19 @@ export default function VerdictScreen() {
 
   const { correct, accusedId, reasoning } = accusation;
   const accused = getSuspect(accusedId);
-  const trueKiller = getSuspect(HARLOW_MANOR.killerId);
-  const { verdict } = HARLOW_MANOR;
+  const rv = resolvedVerdict;
+  const trueKillerId = rv?.trueKillerId ?? HARLOW_MANOR.killerId;
+  const trueKiller = getSuspect(trueKillerId);
+  const canonicalExplanation = rv?.canonicalExplanation ?? HARLOW_MANOR.verdict.explanation;
+  const trueSequence = rv?.trueSequence ?? HARLOW_MANOR.verdict.trueSequence;
+  const missedClueBullets = rv?.missedClueBullets ?? HARLOW_MANOR.verdict.missedClues;
+  const motiveText = rv?.motive ?? HARLOW_MANOR.motive;
 
-  const missedEvidence = HARLOW_MANOR.evidence
-    .filter((e) => !e.isRedHerring && !discoveredEvidence.includes(e.id))
-    .map((e) => e.name);
+  const missedEvidence =
+    rv?.missedEvidenceNames ??
+    HARLOW_MANOR.evidence
+      .filter((e) => !e.isRedHerring && !discoveredEvidence.includes(e.id))
+      .map((e) => e.name);
 
   return (
     <motion.div
@@ -72,7 +79,7 @@ export default function VerdictScreen() {
             {trueKiller.name}
           </div>
           <div className="text-xs text-[#8899AA] mt-1 leading-relaxed" style={{ fontFamily: "Georgia, serif" }}>
-            {HARLOW_MANOR.motive}
+            {motiveText}
           </div>
         </motion.div>
       )}
@@ -90,12 +97,12 @@ export default function VerdictScreen() {
           className="text-xs text-[#8899AA] leading-relaxed"
           style={{ fontFamily: "Georgia, serif" }}
         >
-          {verdict.explanation}
+          {canonicalExplanation}
         </p>
         <div className="mt-3 pt-3 border-t border-white/5">
           <div className="text-[9px] text-[#445566] tracking-wider mb-1">Sequence of Events:</div>
           <p className="text-[10px] text-[#667788] italic leading-relaxed" style={{ fontFamily: "Georgia, serif" }}>
-            {verdict.trueSequence}
+            {trueSequence}
           </p>
         </div>
       </motion.div>
@@ -110,7 +117,7 @@ export default function VerdictScreen() {
       >
         <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-2">Your Deduction</div>
         <p className="text-xs text-[#667788] leading-relaxed italic" style={{ fontFamily: "Georgia, serif" }}>
-          "{reasoning}"
+          {`"${reasoning}"`}
         </p>
       </motion.div>
 
@@ -144,7 +151,7 @@ export default function VerdictScreen() {
       >
         <div className="text-[9px] tracking-[3px] uppercase text-[#334455] mb-2">Key Deductions</div>
         <ul className="space-y-1">
-          {verdict.missedClues.map((clue, i) => (
+          {missedClueBullets.map((clue, i) => (
             <li key={i} className="text-[10px] text-[#556677] leading-relaxed flex gap-2">
               <span className="text-[#334455] flex-shrink-0">·</span>
               <span style={{ fontFamily: "Georgia, serif" }}>{clue}</span>

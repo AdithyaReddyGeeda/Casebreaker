@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useRef, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useLayoutEffect, useCallback, useEffect } from "react";
 import { useGameStore } from "@/lib/store";
 import { HARLOW_MANOR } from "@/lib/cases/harlow-manor";
 import type { EvidenceId } from "@/lib/cases/harlow-manor";
@@ -34,7 +34,7 @@ const CONNECTIONS: Array<{ from: EvidenceId; to: EvidenceId; label: string }> = 
 interface CardCenter { x: number; y: number }
 
 export default function EvidenceScreen() {
-  const { discoveredEvidence, goTo } = useGameStore();
+  const { discoveredEvidence, goTo, registerEvidenceExamination } = useGameStore();
   const [selected, setSelected] = useState<EvidenceId | null>(null);
   const [centers, setCenters] = useState<Partial<Record<EvidenceId, CardCenter>>>({});
 
@@ -62,6 +62,10 @@ export default function EvidenceScreen() {
   useLayoutEffect(() => {
     measureCards();
   }, [discoveredEvidence, selected, measureCards]);
+
+  useEffect(() => {
+    if (selected) registerEvidenceExamination(selected);
+  }, [selected, registerEvidenceExamination]);
 
   const visibleConnections = CONNECTIONS.filter(
     ({ from, to }) => discoveredEvidence.includes(from) && discoveredEvidence.includes(to)
