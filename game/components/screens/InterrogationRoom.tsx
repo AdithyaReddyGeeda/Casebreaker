@@ -65,6 +65,8 @@ export default function InterrogationRoom() {
   const [loading, setLoading] = useState(false);
   const [displayText, setDisplayText] = useState("");
   const [speaking, setSpeaking] = useState(false);
+  const [contextFollowUps, setContextFollowUps] = useState<string[]>([]);
+  const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioEnabled = useRef(true);
@@ -106,6 +108,51 @@ export default function InterrogationRoom() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, displayText]);
+
+  useEffect(() => {
+    if (loading || !selectedSuspect) return;
+    if (messages.length === 0) {
+      setContextFollowUps([]);
+      return;
+    }
+    const last = messages[messages.length - 1];
+    if (last?.role !== "assistant") return;
+
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      setFollowUpsLoading(true);
+      fetch("/api/interrogate/suggest-followups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          suspectId: selectedSuspect,
+          stressLevel: stress,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      })
+        .then(async (res) => {
+          if (!res.ok) return;
+          const data = (await res.json()) as { questions?: unknown };
+          if (Array.isArray(data.questions)) {
+            setContextFollowUps(
+              data.questions.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+            );
+          }
+        })
+        .catch(() => {
+          /* offline / abort — keep prior chips */
+        })
+        .finally(() => {
+          setFollowUpsLoading(false);
+        });
+    }, 450);
+
+    return () => {
+      ctrl.abort();
+      window.clearTimeout(timer);
+    };
+  }, [messages, loading, selectedSuspect, stress]);
 
   const speakText = useCallback(async (text: string) => {
     if (!audioEnabled.current || !suspect) return;
@@ -251,6 +298,26 @@ export default function InterrogationRoom() {
       ? [...(INTERROGATION_STRESS_FOLLOWUP_QUESTIONS[selectedSuspect] ?? [])]
       : [];
   const bottomStressHint = interrogationBottomStressHint(stress);
+
+  const mergedSuggestionChips = useMemo(() => {
+    const seen = new Set<string>();
+    const add = (q: string, kind: "context" | "static") => {
+      const k = q.trim().toLowerCase();
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      return { q: q.trim(), kind };
+    };
+    const out: { q: string; kind: "context" | "static" }[] = [];
+    for (const q of contextFollowUps) {
+      const row = add(q, "context");
+      if (row) out.push(row);
+    }
+    for (const q of [...suggested, ...highStressQs]) {
+      const row = add(q, "static");
+      if (row) out.push(row);
+    }
+    return out.slice(0, 12);
+  }, [contextFollowUps, suggested, highStressQs]);
 
   return (
     <motion.div
@@ -424,15 +491,31 @@ export default function InterrogationRoom() {
                 </button>
               </div>
 
-              {/* Suggested questions */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {[...suggested, ...highStressQs].map((q) => (
+              {/* Suggested questions — AI follow-ups from transcript first, then static */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {followUpsLoading ? (
+                  <span className="text-[9px] italic text-[#445566] px-1">Updating suggestions…</span>
+                ) : null}
+                {mergedSuggestionChips.map(({ q, kind }, i) => (
                   <button
-                    key={q}
-                    onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                    key={`${kind}-${i}-${q.slice(0, 24)}`}
+                    type="button"
+                    onClick={() => {
+                      setInput(q);
+                      inputRef.current?.focus();
+                    }}
                     disabled={loading}
-                    className="text-[10px] px-2.5 py-1 rounded transition-colors disabled:opacity-30"
-                    style={{ background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", color: "#667788" }}
+                    className="text-[10px] px-2.5 py-1 rounded transition-colors disabled:opacity-30 text-left max-w-[100%]"
+                    style={{
+                      background:
+                        kind === "context" ? "rgba(212,168,67,.07)" : "rgba(255,255,255,.03)",
+                      border:
+                        kind === "context"
+                          ? "1px solid rgba(212,168,67,.22)"
+                          : "1px solid rgba(255,255,255,.07)",
+                      color: kind === "context" ? "#A8986E" : "#667788",
+                    }}
+                    title={kind === "context" ? "From this conversation" : "Suggested starter"}
                   >
                     {q}
                   </button>
