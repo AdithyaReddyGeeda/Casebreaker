@@ -17,8 +17,7 @@ export const QUESTION_STRESS_KEYWORDS: Record<SuspectId, readonly string[]> = {
     "missing",
   ],
   victoria: [
-    "will",
-    "amended",
+    "amended will",
     "charity",
     "gloves",
     "greenhouse",
@@ -28,6 +27,7 @@ export const QUESTION_STRESS_KEYWORDS: Record<SuspectId, readonly string[]> = {
     "corridor",
     "garden",
     "poison",
+    "disinherit",
   ],
   oliver: [
     "gambling",
@@ -44,12 +44,56 @@ export const QUESTION_STRESS_KEYWORDS: Record<SuspectId, readonly string[]> = {
 
 const MAX_IMPACT = 25;
 const PER_HIT = 8;
+const RELIEF_PER_HIT = 10;
+const RELIEF_MAX = 22;
+const NET_MIN = -18;
+const NET_MAX = 25;
+
+/** Phrases that signal the detective is backing off or affirming innocence — lowers stress. */
+export const REASSURING_SNIPPETS: readonly string[] = [
+  "innocent",
+  "not guilty",
+  "believe you",
+  "trust you",
+  "mean no harm",
+  "sorry to",
+  "ease up",
+  "calm down",
+  "not accusing",
+  "not a suspect",
+  "clear you",
+  "clearing you",
+  "mistake",
+  "good news",
+  "off the hook",
+  "vindicated",
+  "exonerat",
+  "reassure",
+  "no longer think",
+  "wrong about you",
+  "thank you for",
+];
+
+export function isReassuringQuestion(question: string): boolean {
+  const lower = question.toLowerCase();
+  return REASSURING_SNIPPETS.some((s) => lower.includes(s));
+}
 
 export function calculateQuestionStressImpact(suspectId: SuspectId, question: string): number {
   const lower = question.toLowerCase();
   const keywords = QUESTION_STRESS_KEYWORDS[suspectId] ?? [];
   const hits = keywords.filter((k) => lower.includes(k)).length;
-  return Math.min(MAX_IMPACT, hits * PER_HIT);
+  let pressure = Math.min(MAX_IMPACT, hits * PER_HIT);
+
+  const reliefHits = REASSURING_SNIPPETS.filter((s) => lower.includes(s)).length;
+  if (reliefHits > 0) {
+    pressure -= Math.min(RELIEF_MAX, reliefHits * RELIEF_PER_HIT);
+  }
+  if (reliefHits > 0 && hits === 0) {
+    pressure = Math.min(pressure, -8);
+  }
+
+  return Math.max(NET_MIN, Math.min(NET_MAX, pressure));
 }
 
 export type StressBand = "low" | "moderate" | "high";

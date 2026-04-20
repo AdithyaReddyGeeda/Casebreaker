@@ -1,9 +1,8 @@
 "use client";
 
-import { Suspense, useRef, useEffect } from "react";
-import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, useGLTF } from "@react-three/drei";
-import * as THREE from "three";
+import { Suspense, useMemo } from "react";
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
 import type { EvidenceId, SuspectId } from "@/lib/cases/harlow-manor";
 import { ProfessionalControls } from "./ProfessionalControls";
 
@@ -19,68 +18,79 @@ type SceneProps = {
   stressed: boolean;
 };
 
-// Room model - simple direct load
-function RoomModel() {
-  const { scene } = useGLTF("/models/interogation_room.glb");
-
-  return <primitive object={scene} />;
-}
-
-// Head model - scaled and positioned
-function SuspectModel({ stressed }: { stressed: boolean }) {
-  const { scene } = useGLTF("/models/suspect-head.glb");
-
-  return (
-    <group position={[-5, 95, 20]} scale={[27, 27, 27]}>
-      <primitive object={scene} />
-    </group>
-  );
-}
-
-// Simple camera setup
-function CameraSetup() {
-  const { camera } = useThree();
-
-  useEffect(() => {
-    // Position camera to see entire scene
-    camera.position.set(500, 200, 500);
-    camera.lookAt(0, 150, 0);
-    camera.updateProjectionMatrix();
-  }, [camera]);
-
-  return null;
-}
-
-function InterrogationScene({ suspectId, evidenceIds, stressed }: SceneProps) {
+/** Procedural room + figure — no external .glb (optional: drop models under public/models/ later). */
+function InterrogationPlaceholderScene({ suspectId, evidenceIds, stressed }: SceneProps) {
+  const tint = SUSPECT_TINT[suspectId];
   const accent = stressed ? "#c05040" : "#D4A843";
-  const evidenceSlots = evidenceIds.slice(0, 8);
+  const evidenceSlots = useMemo(() => evidenceIds.slice(0, 8), [evidenceIds]);
 
   return (
     <group>
-      {/* Lighting */}
-      <ambientLight intensity={0.8} />
-      <directionalLight
-        position={[15, 20, 15]}
-        intensity={1.4}
-      />
-      <pointLight position={[-10, 7, 6]} intensity={0.8} color="#ffffff" />
-      <pointLight position={[5, 5, -8]} intensity={stressed ? 0.9 : 0.6} color={accent} />
+      <ambientLight intensity={0.45} />
+      <directionalLight castShadow position={[3.5, 6, 4]} intensity={1.15} />
+      <pointLight position={[-2.5, 2.5, 1.5]} intensity={stressed ? 0.55 : 0.35} color={accent} />
 
-      {/* Models */}
-      <RoomModel />
-      <SuspectModel stressed={stressed} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
+        <planeGeometry args={[10, 10]} />
+        <meshStandardMaterial color="#070e14" roughness={0.92} metalness={0.05} />
+      </mesh>
 
-      {/* Evidence */}
+      <group position={[0, 0, -0.42]}>
+        <mesh castShadow position={[0, 0.22, 0]}>
+          <boxGeometry args={[0.52, 0.42, 0.09]} />
+          <meshStandardMaterial color="#2a2220" roughness={0.75} />
+        </mesh>
+        <mesh castShadow position={[0, 0.02, 0.2]}>
+          <boxGeometry args={[0.52, 0.08, 0.42]} />
+          <meshStandardMaterial color="#2a2220" roughness={0.75} />
+        </mesh>
+      </group>
+
+      <group position={[0, 0.12, -0.18]} rotation={[0.12, 0, 0]}>
+        <mesh castShadow position={[0, 0.32, 0]}>
+          <boxGeometry args={[0.34, 0.52, 0.22]} />
+          <meshStandardMaterial
+            color={tint}
+            roughness={0.62}
+            metalness={0.12}
+            emissive={tint}
+            emissiveIntensity={0.12}
+          />
+        </mesh>
+        <mesh castShadow position={[0, 0.72, 0.04]}>
+          <sphereGeometry args={[0.11, 20, 20]} />
+          <meshStandardMaterial color="#c4b4a4" roughness={0.55} />
+        </mesh>
+      </group>
+
+      <group position={[0, 0, 0.38]}>
+        <mesh castShadow position={[0, 0.52, 0]}>
+          <boxGeometry args={[1.2, 0.06, 0.52]} />
+          <meshStandardMaterial color="#1a1412" roughness={0.55} metalness={0.15} />
+        </mesh>
+        {[
+          [-0.48, 0.22],
+          [0.48, 0.22],
+          [-0.48, -0.22],
+          [0.48, -0.22],
+        ].map(([x, z], i) => (
+          <mesh key={i} castShadow position={[x, 0.24, z]}>
+            <cylinderGeometry args={[0.04, 0.045, 0.48, 8]} />
+            <meshStandardMaterial color="#14100e" roughness={0.65} />
+          </mesh>
+        ))}
+      </group>
+
       {evidenceSlots.map((id, i) => {
         const spread = Math.min(Math.max(evidenceSlots.length, 1), 6);
         const idx = i % spread;
-        const x = (idx - (spread - 1) / 2) * 0.3;
+        const x = (idx - (spread - 1) / 2) * 0.22;
         const row = Math.floor(i / spread);
-        const zOff = row * 0.2;
+        const zOff = row * 0.14;
         return (
-          <mesh key={`${id}-${i}`} position={[x, 1.15, 0.3 + zOff]}>
-            <boxGeometry args={[0.12, 0.07, 0.15]} />
-            <meshStandardMaterial color="#D4A843" roughness={0.4} metalness={0.3} />
+          <mesh key={`${id}-${i}`} castShadow position={[x, 0.58, 0.38 + zOff]}>
+            <boxGeometry args={[0.1, 0.06, 0.12]} />
+            <meshStandardMaterial color="#D4A843" roughness={0.4} metalness={0.35} />
           </mesh>
         );
       })}
@@ -91,24 +101,22 @@ function InterrogationScene({ suspectId, evidenceIds, stressed }: SceneProps) {
 function InterrogationRoom3D(props: SceneProps) {
   return (
     <Canvas
-      camera={{ position: [20, 5, 20], fov: 45, near: 0.1, far: 5000 }}
+      camera={{ position: [2.2, 1.35, 2.8], fov: 45, near: 0.1, far: 100 }}
       style={{ width: "100%", height: "100%" }}
       shadows
     >
-      <color attach="background" args={["#0a0a0a"]} />
-
-      <CameraSetup />
+      <color attach="background" args={["#0a0f14"]} />
       <ProfessionalControls />
       <Suspense fallback={null}>
-        <InterrogationScene {...props} />
+        <InterrogationPlaceholderScene {...props} />
         <OrbitControls
-          enablePan={true}
-          enableZoom={true}
-          enableRotate={true}
-          minDistance={50}
-          maxDistance={1000}
+          enablePan
+          enableZoom
+          enableRotate
+          minDistance={0.85}
+          maxDistance={9}
           dampingFactor={0.06}
-          enableDamping={true}
+          enableDamping
           rotateSpeed={0.7}
           zoomSpeed={0.08}
           panSpeed={0.5}

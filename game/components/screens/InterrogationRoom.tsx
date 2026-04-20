@@ -18,6 +18,7 @@ import {
   interrogationPortraitStressed,
   interrogationStressBarColor,
   interrogationStressTopBarLabel,
+  isReassuringQuestion,
 } from "@/lib/investigation/interrogationStressRules";
 import InterrogationRoomScene3D from "@/components/interrogation/InterrogationRoomScene3D";
 import EvidenceBoard from "@/components/ui/EvidenceBoard";
@@ -93,6 +94,7 @@ export default function InterrogationRoom() {
         : [],
     [activeEvidenceSelection, selectedSuspect]
   );
+  const hasInterrogationMessages = messages.length > 0;
   const supportiveEvidence = useMemo(
     () =>
       selectedSuspect
@@ -140,16 +142,23 @@ export default function InterrogationRoom() {
 
     try {
       let fullResponse = "";
+      const reassuring = isReassuringQuestion(text);
       const evidenceContext =
-        contradictoryEvidence.length > 0
-          ? `\n\n[Detective note: The player is confronting the suspect with ${contradictoryEvidence
+        reassuring && contradictoryEvidence.length > 0
+          ? `\n\n[Detective note: The player's words are reassuring or affirm innocence (e.g. clearing them, believing them). Even if ${contradictoryEvidence
               .map((item) => item.title)
-              .join(", ")}. These exhibits contradict the suspect's story, so the reply should feel more defensive, pressured, or inconsistent.]`
-          : supportiveEvidence.length > 0
-            ? `\n\n[Detective note: The player is referencing ${supportiveEvidence
-                .map((item) => item.title)
-                .join(", ")}, which partly supports this suspect's account. The reply can sound steadier or more confident.]`
-            : "";
+              .join(", ")} is in play, respond with guarded relief or softening — not full panic — unless they also directly accuse.]`
+          : reassuring
+            ? `\n\n[Detective note: The player is reassuring you or treating you as cleared. Match a calmer, less defensive tone.]`
+            : contradictoryEvidence.length > 0
+              ? `\n\n[Detective note: The player is confronting the suspect with ${contradictoryEvidence
+                  .map((item) => item.title)
+                  .join(", ")}. These exhibits contradict the suspect's story, so the reply should feel more defensive, pressured, or inconsistent.]`
+              : supportiveEvidence.length > 0
+                ? `\n\n[Detective note: The player is referencing ${supportiveEvidence
+                    .map((item) => item.title)
+                    .join(", ")}, which partly supports this suspect's account. The reply can sound steadier or more confident.]`
+                : "";
       const result = await interrogateSuspect(
         {
           suspectId: selectedSuspect,
@@ -159,7 +168,7 @@ export default function InterrogationRoom() {
           stressLevel: stress,
         },
         (parsed) => {
-          if (parsed.type === "meta" && parsed.stressImpact > 0) {
+          if (parsed.type === "meta") {
             increaseStress(selectedSuspect, parsed.stressImpact);
           } else if (parsed.type === "token" && parsed.text) {
             fullResponse += parsed.text;
@@ -180,7 +189,15 @@ export default function InterrogationRoom() {
           "No reply received. Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY, optional INTERROGATION_LLM_PROVIDER=openai|anthropic|auto, restart dev, check /api/interrogate in Network.",
       };
       addMessages(selectedSuspect, [assistantMsg]);
-      if (contradictoryEvidence.length > 0) {
+      if (reassuring) {
+        if (contradictoryEvidence.length > 0) {
+          increaseStress(selectedSuspect, -7);
+        } else if (supportiveEvidence.length > 0) {
+          increaseStress(selectedSuspect, -5);
+        } else {
+          increaseStress(selectedSuspect, -5);
+        }
+      } else if (contradictoryEvidence.length > 0) {
         increaseStress(selectedSuspect, 6);
       } else if (supportiveEvidence.length > 0) {
         increaseStress(selectedSuspect, -4);
@@ -306,14 +323,18 @@ export default function InterrogationRoom() {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
               {contradictoryEvidence.length > 0 && (
-                <div className="rounded-md border border-[#5B3B30] bg-[#2A1715] px-3 py-2 text-[10px] uppercase tracking-[1.8px] text-[#D9A08E]">
-                  This evidence contradicts their statement.
+                <div className="rounded-md border border-[#5B3B30] bg-[#2A1715] px-3 py-2 text-[10px] leading-relaxed tracking-[0.02em] text-[#D9A08E]">
+                  {hasInterrogationMessages
+                    ? "Loaded evidence contradicts what they’ve said in this interview."
+                    : "Loaded evidence cuts against this suspect’s story in the case file. Press them once the conversation starts."}
                 </div>
               )}
 
               {supportiveEvidence.length > 0 && contradictoryEvidence.length === 0 && (
-                <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] uppercase tracking-[1.8px] text-[#8FA1B8]">
-                  Selected evidence supports part of their account.
+                <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] leading-relaxed tracking-[0.02em] text-[#8FA1B8]">
+                  {hasInterrogationMessages
+                    ? "Selected evidence lines up with what they’ve claimed here."
+                    : "Selected evidence aligns with their known account in the file — use it to test details once you begin."}
                 </div>
               )}
 

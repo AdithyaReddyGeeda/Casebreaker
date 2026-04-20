@@ -73,6 +73,7 @@ export {
   interrogationPortraitStressed,
   interrogationStressBarColor,
   interrogationStressTopBarLabel,
+  isReassuringQuestion,
   QUESTION_STRESS_KEYWORDS,
   stressBandFromNumericLevel,
   stressBandInstructionFragment,

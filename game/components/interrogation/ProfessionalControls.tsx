@@ -299,6 +299,15 @@ export function ProfessionalControls() {
   // ========== EVENT: Keyboard ==========
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === " ") {
+      const el = e.target as HTMLElement | null;
+      const typing =
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable);
+      if (typing) return;
+
       spaceDownRef.current = true;
       e.preventDefault();
     }

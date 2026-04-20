@@ -38,14 +38,26 @@ function svgDataUrl(svg: string): string {
 }
 
 export function buildEvidencePlaceholderImage(
-  evidence: Pick<Evidence, "title" | "category" | "status">
+  evidence: Pick<Evidence, "title" | "category" | "status">,
+  options?: { variant?: "card" | "detail" }
 ): string {
+  const variant = options?.variant ?? "card";
+  const showTitleInArt = variant === "card";
+
   const badge =
     evidence.status === "Key Evidence"
       ? "KEY"
       : evidence.status === "Reviewed"
         ? "FILED"
         : "CLUE";
+
+  const titleBlock =
+    showTitleInArt
+      ? `
+      <text x="256" y="372" text-anchor="middle" font-family="Georgia, serif" font-size="28" fill="#E8ECF3">${evidence.title}</text>
+      <text x="256" y="404" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" letter-spacing="3" fill="#7E8A99">${evidence.category.toUpperCase()}</text>`
+      : `
+      <text x="256" y="388" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" letter-spacing="3" fill="#7E8A99">${evidence.category.toUpperCase()}</text>`;
 
   return svgDataUrl(`
     <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
@@ -62,8 +74,7 @@ export function buildEvidencePlaceholderImage(
       <circle cx="256" cy="220" r="78" fill="rgba(212,168,67,0.12)" stroke="rgba(212,168,67,0.28)" stroke-width="4" />
       <path d="M226 180h60c14 0 26 12 26 26v30c0 14-12 26-26 26h-60c-14 0-26-12-26-26v-30c0-14 12-26 26-26z" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)" stroke-width="4" />
       <path d="M214 302h84" stroke="rgba(255,255,255,0.22)" stroke-width="10" stroke-linecap="round" />
-      <text x="256" y="372" text-anchor="middle" font-family="Georgia, serif" font-size="28" fill="#E8ECF3">${evidence.title}</text>
-      <text x="256" y="404" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" letter-spacing="3" fill="#7E8A99">${evidence.category.toUpperCase()}</text>
+      ${titleBlock}
     </svg>
   `);
 }

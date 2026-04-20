@@ -43,14 +43,16 @@ function EvidenceImageFrame({
   size: "card" | "detail";
 }) {
   const isDetail = size === "detail";
-  const placeholder = buildEvidencePlaceholderImage({
-    title: evidence.title,
-    category: evidence.category,
-    status: evidence.status,
-  });
+  const placeholder = buildEvidencePlaceholderImage(
+    {
+      title: evidence.title,
+      category: evidence.category,
+      status: evidence.status,
+    },
+    { variant: isDetail ? "detail" : "card" }
+  );
   const imageSrc = evidence.imageUrl || placeholder;
   const showLoading = evidence.imageStatus === "generating";
-  const showFallback = !evidence.imageUrl || evidence.imageStatus === "failed";
 
   return (
     <div
@@ -64,13 +66,15 @@ function EvidenceImageFrame({
         className="h-full w-full object-cover"
       />
       {showLoading ? (
-        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/5 via-transparent to-white/10" />
+        <>
+          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/5 via-transparent to-white/10" />
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-2">
+            <div className="text-[10px] uppercase tracking-[2px] text-[#E8ECF3]">
+              Generating image…
+            </div>
+          </div>
+        </>
       ) : null}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2 py-1">
-        <div className="text-[9px] uppercase tracking-[1.8px] text-[#C8D0DC]">
-          {showLoading ? "Generating" : showFallback ? "Placeholder" : "Rendered"}
-        </div>
-      </div>
     </div>
   );
 }
@@ -81,6 +85,7 @@ export default function EvidenceBoard() {
     discoveredEvidence,
     selectedEvidenceIds,
     selectedSuspect,
+    interrogationHistories,
     toggleEvidenceSelection,
     markEvidenceReviewed,
     setEvidenceForAccusation,
@@ -95,6 +100,10 @@ export default function EvidenceBoard() {
   const displayedEvidence = selectedEvidence
     ? evidenceItems.find((item) => item.id === selectedEvidence.id) ?? null
     : null;
+
+  const hasInterrogationMessages =
+    selectedSuspect != null &&
+    (interrogationHistories[selectedSuspect]?.length ?? 0) > 0;
 
   const contradictionActive =
     displayedEvidence && selectedSuspect
@@ -225,8 +234,10 @@ export default function EvidenceBoard() {
               </div>
 
               {contradictionActive ? (
-                <div className="mt-4 rounded-md border border-[#5B3B30] bg-[#2A1715] px-3 py-2 text-[11px] uppercase tracking-[1.8px] text-[#D9A08E]">
-                  This evidence contradicts their statement
+                <div className="mt-4 rounded-md border border-[#5B3B30] bg-[#2A1715] px-3 py-2 text-[11px] leading-snug tracking-[0.02em] text-[#D9A08E]">
+                  {hasInterrogationMessages
+                    ? "This evidence contradicts what they’ve said in this interview."
+                    : "This exhibit cuts against this suspect’s account in the case file — not necessarily something they’ve said aloud yet."}
                 </div>
               ) : null}
 
