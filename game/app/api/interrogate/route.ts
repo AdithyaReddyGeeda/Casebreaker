@@ -4,6 +4,7 @@ import {
   buildInterrogationSystemPrompt,
   calculateQuestionStressImpact,
   parseInterrogationPostBody,
+  resolveInterrogationMaxOutputTokens,
   type InterrogationPostBody,
 } from "@/lib/investigation";
 import { resolveInterrogationLlmProvider } from "@/lib/investigation/interrogationLlmProvider";
@@ -19,7 +20,8 @@ const SSE_HEADERS = {
 function sseMetaAndOpenAIStream(
   systemPrompt: string,
   stressImpact: number,
-  body: InterrogationPostBody
+  body: InterrogationPostBody,
+  maxOutputTokens: number
 ): ReadableStream<Uint8Array> {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
   const model =
@@ -45,7 +47,7 @@ function sseMetaAndOpenAIStream(
         const stream = await openai.chat.completions.create({
           model,
           messages,
-          max_tokens: 250,
+          max_tokens: maxOutputTokens,
           temperature: 0.85,
           stream: true,
         });
@@ -65,7 +67,7 @@ function sseMetaAndOpenAIStream(
           const completion = await openai.chat.completions.create({
             model,
             messages,
-            max_tokens: 250,
+            max_tokens: maxOutputTokens,
             temperature: 0.85,
           });
           const text = completion.choices[0]?.message?.content?.trim() ?? "";
@@ -90,7 +92,8 @@ function sseMetaAndOpenAIStream(
 function sseMetaAndAnthropicStream(
   systemPrompt: string,
   stressImpact: number,
-  body: InterrogationPostBody
+  body: InterrogationPostBody,
+  maxOutputTokens: number
 ): ReadableStream<Uint8Array> {
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
   const messages = [
@@ -105,7 +108,7 @@ function sseMetaAndAnthropicStream(
     model: "claude-haiku-4-5-20251001",
     system: systemPrompt,
     messages,
-    max_tokens: 250,
+    max_tokens: maxOutputTokens,
     temperature: 0.85,
   });
 
@@ -165,8 +168,14 @@ export async function POST(req: Request) {
       });
     }
 
-    const { suspectId, question, history, discoveredEvidence, stressLevel } =
-      parsed.body;
+    const {
+      suspectId,
+      question,
+      history,
+      discoveredEvidence,
+      stressLevel,
+      maxOutputTokens: clientMaxTokens,
+    } = parsed.body;
 
     const systemPrompt = buildInterrogationSystemPrompt(
       suspectId,
@@ -174,6 +183,11 @@ export async function POST(req: Request) {
       stressLevel
     );
     const stressImpact = calculateQuestionStressImpact(suspectId, question);
+    const maxOutputTokens = resolveInterrogationMaxOutputTokens({
+      stressLevel,
+      question,
+      clientMaxTokens,
+    });
 
     const body: InterrogationPostBody = {
       suspectId,
@@ -181,6 +195,7 @@ export async function POST(req: Request) {
       history,
       discoveredEvidence,
       stressLevel,
+      ...(clientMaxTokens !== undefined ? { maxOutputTokens: clientMaxTokens } : {}),
     };
 
     const resolved = resolveInterrogationLlmProvider();
@@ -192,8 +207,8 @@ export async function POST(req: Request) {
 
     const stream =
       resolved.provider === "openai"
-        ? sseMetaAndOpenAIStream(systemPrompt, stressImpact, body)
-        : sseMetaAndAnthropicStream(systemPrompt, stressImpact, body);
+        ? sseMetaAndOpenAIStream(systemPrompt, stressImpact, body, maxOutputTokens)
+        : sseMetaAndAnthropicStream(systemPrompt, stressImpact, body, maxOutputTokens);
 
     return new Response(stream, { headers: SSE_HEADERS });
   } catch (e) {

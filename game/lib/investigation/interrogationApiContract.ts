@@ -10,6 +10,8 @@ export type InterrogationPostBody = {
   history: { role: "user" | "assistant"; content: string }[];
   discoveredEvidence: EvidenceId[];
   stressLevel: number;
+  /** Optional; clamped server-side. If omitted, max output tokens are derived from stress + question length. */
+  maxOutputTokens?: number;
 };
 
 function isEvidenceIdArray(v: unknown): v is EvidenceId[] {
@@ -75,6 +77,17 @@ export function parseInterrogationPostBody(raw: unknown):
     return { ok: false, error: "Invalid stressLevel", status: 400 };
   }
 
+  let maxOutputTokens: number | undefined;
+  const rawMax = o.maxOutputTokens;
+  if (rawMax !== undefined && rawMax !== null) {
+    const m =
+      typeof rawMax === "number" ? rawMax : Number(rawMax);
+    if (!Number.isFinite(m)) {
+      return { ok: false, error: "Invalid maxOutputTokens", status: 400 };
+    }
+    maxOutputTokens = Math.max(64, Math.min(256, Math.round(m)));
+  }
+
   return {
     ok: true,
     body: {
@@ -83,6 +96,7 @@ export function parseInterrogationPostBody(raw: unknown):
       history,
       discoveredEvidence,
       stressLevel: Math.max(0, Math.min(100, stress)),
+      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
     },
   };
 }

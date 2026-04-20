@@ -20,6 +20,13 @@ export function buildEvidenceContextForPrompt(discoveredEvidence: EvidenceId[]):
  * Full system prompt for `/api/interrogate`. Outcome/progression/verdict are not decided here —
  * only in-character reply style + known discovered evidence + stress flavor.
  */
+const REPLY_LENGTH_SUFFIX = `
+
+GLOBAL REPLY LENGTH (applies to every answer):
+- Hard limit: at most 3 short sentences, under 70 words total.
+- Sound like spoken interrogation dialogue — no lists, no numbered points, no “In conclusion”.
+- If you already said the essential thing, stop. Do not pad or recap.`;
+
 export function buildInterrogationSystemPrompt(
   suspectId: SuspectId,
   discoveredEvidence: EvidenceId[],
@@ -29,5 +36,5 @@ export function buildInterrogationSystemPrompt(
   const evidenceCtx = buildEvidenceContextForPrompt(discoveredEvidence);
   const band = stressBandFromNumericLevel(stressLevel);
   const stressNote = stressBandInstructionFragment(band);
-  return `${base}${evidenceCtx}${stressNote}`;
+  return `${base}${evidenceCtx}${stressNote}${REPLY_LENGTH_SUFFIX}`;
 }

@@ -62,6 +62,8 @@ export {
 export type { InterrogationPostBody } from "./interrogationApiContract";
 export { parseInterrogationPostBody } from "./interrogationApiContract";
 
+export { resolveInterrogationMaxOutputTokens } from "./interrogationMaxOutputTokens";
+
 export {
   buildEvidenceContextForPrompt,
   buildInterrogationSystemPrompt,
