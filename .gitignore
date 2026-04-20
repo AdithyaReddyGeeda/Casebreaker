@@ -48,6 +48,7 @@ chroma_data/
 *.mov
 *.mp4
 *.fbx
+*.glb
 
 # ===== Misc =====
 .cursor/
