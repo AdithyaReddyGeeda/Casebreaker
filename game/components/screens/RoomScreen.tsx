@@ -2,13 +2,30 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { EvidenceImageFrame } from "@/components/ui/EvidenceImageFrame";
 import { useGameStore } from "@/lib/store";
 import { getRoom, getEvidence } from "@/lib/cases/harlow-manor";
 import type { EvidenceId } from "@/lib/cases/harlow-manor";
+import type { Evidence } from "@/lib/evidence/types";
+
+function gameEvidenceForCaseId(
+  storeEvidence: Evidence[],
+  evId: EvidenceId
+): Evidence | undefined {
+  return storeEvidence.find(
+    (e) => e.caseEvidenceId === evId || e.id === evId
+  );
+}
 
 export default function RoomScreen() {
-  const { selectedRoom, goTo, searchRoom, searchedRooms, registerEvidenceExamination } =
-    useGameStore();
+  const {
+    selectedRoom,
+    goTo,
+    searchRoom,
+    searchedRooms,
+    registerEvidenceExamination,
+    evidence: storeEvidence,
+  } = useGameStore();
   const [revealed, setRevealed] = useState<EvidenceId[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<EvidenceId | null>(null);
@@ -118,6 +135,7 @@ export default function RoomScreen() {
               <div className="flex flex-col gap-2">
                 {evidenceInRoom.map((evId) => {
                   const ev = getEvidence(evId);
+                  const gameEv = gameEvidenceForCaseId(storeEvidence, evId);
                   const isNew = revealed.includes(evId);
                   return (
                     <motion.div
@@ -134,28 +152,39 @@ export default function RoomScreen() {
                           borderColor: selectedEvidence === evId ? "rgba(212,168,67,.4)" : "rgba(255,255,255,.08)",
                         }}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-[#C8D0DC] tracking-wide">{ev.name}</div>
-                          <div className="text-[10px] text-[#D4A843]">{selectedEvidence === evId ? "▲" : "▼"}</div>
+                        <div className="flex gap-4 items-start">
+                          {gameEv ? (
+                            <EvidenceImageFrame evidence={gameEv} size="room" />
+                          ) : null}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold text-[#C8D0DC] tracking-wide">
+                                {ev.name}
+                              </div>
+                              <div className="text-[10px] text-[#D4A843] shrink-0">
+                                {selectedEvidence === evId ? "▲" : "▼"}
+                              </div>
+                            </div>
+                            <AnimatePresence>
+                              {selectedEvidence === evId && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0 }}
+                                  animate={{ height: "auto", opacity: 1 }}
+                                  exit={{ height: 0, opacity: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <p
+                                    className="text-xs text-[#8899AA] mt-2 leading-relaxed"
+                                    style={{ fontFamily: "Georgia, serif" }}
+                                  >
+                                    {ev.description}
+                                  </p>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
                         </div>
-                        <AnimatePresence>
-                          {selectedEvidence === evId && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="overflow-hidden"
-                            >
-                              <p
-                                className="text-xs text-[#8899AA] mt-2 leading-relaxed"
-                                style={{ fontFamily: "Georgia, serif" }}
-                              >
-                                {ev.description}
-                              </p>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </button>
                     </motion.div>
                   );

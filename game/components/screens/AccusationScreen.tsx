@@ -78,14 +78,19 @@ export default function AccusationScreen() {
     goTo("verdict");
   }
 
+  const canTrySubmit = Boolean(accused && reasoning.trim());
+  const evidenceCount = accusationEvidence.length;
+  const evidenceCountOk = evidenceCount >= 1 && evidenceCount <= 3;
+
   return (
     <motion.div
-      className="flex flex-col h-full px-6 py-5 gap-5 overflow-y-auto"
+      className="flex h-full min-h-0 flex-col"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.5 }}
     >
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 space-y-5">
       <div className="flex items-center justify-between">
         <button
           onClick={() => goTo("manor")}
@@ -249,21 +254,46 @@ export default function AccusationScreen() {
           rows={4}
         />
       </div>
+      </div>
 
-      <motion.button
-        onClick={handleAccuse}
-        disabled={!accused || !reasoning.trim()}
-        className="py-4 text-sm tracking-[3px] uppercase font-semibold transition-all disabled:opacity-30"
+      {/* Sticky footer — submit always visible without scrolling */}
+      <div
+        className="flex-shrink-0 border-t border-white/10 px-6 py-4"
         style={{
-          background: "rgba(212,168,67,.1)",
-          border: "1px solid rgba(212,168,67,.4)",
-          color: "#D4A843",
-          fontFamily: "Georgia, serif",
+          background: "linear-gradient(to top, #070E1A 85%, rgba(7,14,26,0.92))",
+          boxShadow: "0 -12px 24px rgba(0,0,0,.35)",
         }}
-        whileHover={{ background: "rgba(212,168,67,.18)" }}
       >
-        {accused ? `Accuse ${getSuspect(accused).name.split(" ").slice(-1)[0]} →` : "Select a Suspect"}
-      </motion.button>
+        <p className="text-[10px] text-[#8899AA] mb-2 text-center leading-relaxed px-1">
+          {!accused && "Scroll up to choose who you accuse, attach evidence, and explain your reasoning."}
+          {accused && !evidenceCountOk && "Scroll up — pick 1 to 3 items under “Accusation Evidence” (tap cards to select)."}
+          {accused && evidenceCountOk && !reasoning.trim() && "Scroll up — fill in “Your Reasoning”."}
+          {accused && evidenceCountOk && reasoning.trim() && (
+            <span className="text-[#9AA8B8]">
+              Submit runs a final check (including key evidence for your suspect). You’ll confirm once more in the popup.
+            </span>
+          )}
+        </p>
+        <motion.button
+          type="button"
+          onClick={handleAccuse}
+          disabled={!canTrySubmit}
+          className="w-full py-3.5 text-sm tracking-[3px] uppercase font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed rounded-md"
+          style={{
+            background: canTrySubmit ? "rgba(212,168,67,.14)" : "rgba(255,255,255,.04)",
+            border: canTrySubmit
+              ? "1px solid rgba(212,168,67,.45)"
+              : "1px solid rgba(255,255,255,.12)",
+            color: canTrySubmit ? "#E8D4A8" : "#556677",
+            fontFamily: "Georgia, serif",
+          }}
+          whileHover={canTrySubmit ? { background: "rgba(212,168,67,.22)" } : {}}
+        >
+          {accused
+            ? `Submit accusation — ${getSuspect(accused).name.split(" ").slice(-1)[0]} →`
+            : "Choose a suspect to submit"}
+        </motion.button>
+      </div>
 
       {/* Confirmation modal */}
       {confirming && accused && (

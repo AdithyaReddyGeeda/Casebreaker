@@ -24,6 +24,10 @@ import InterrogationRoomScene3D from "@/components/interrogation/InterrogationRo
 import EvidenceBoard from "@/components/ui/EvidenceBoard";
 import { getDiscoveredEvidence } from "@/lib/evidence/sampleEvidence";
 
+/** New AI batches after this many suggestion-chip taps (aim for 2–3 uses of the current set). */
+const MIN_SUGGESTION_USES_BEFORE_REFRESH = 3;
+const MAX_VISIBLE_SUGGESTION_CHIPS = 4;
+
 function SuspectMetaFooter({ suspectId, stressed }: { suspectId: SuspectId; stressed: boolean }) {
   const suspect = getSuspect(suspectId);
   return (
@@ -70,6 +74,8 @@ export default function InterrogationRoom() {
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioEnabled = useRef(true);
+  /** Counts clicks on suggestion chips since the last batch was loaded from the API. */
+  const suggestionUsesSinceBatchRef = useRef(0);
 
   const messages: Message[] = useMemo(
     () => (selectedSuspect ? interrogationHistories[selectedSuspect] ?? [] : []),
@@ -110,13 +116,26 @@ export default function InterrogationRoom() {
   }, [messages, displayText]);
 
   useEffect(() => {
+    setContextFollowUps([]);
+    suggestionUsesSinceBatchRef.current = 0;
+  }, [selectedSuspect]);
+
+  const fetchFollowUpPayload = useCallback(
+    (opts: { openingAngles: boolean; msgs: Message[] }) =>
+      JSON.stringify({
+        suspectId: selectedSuspect,
+        stressLevel: stress,
+        discoveredEvidence,
+        openingAngles: opts.openingAngles,
+        messages: opts.msgs.map((m) => ({ role: m.role, content: m.content })),
+      }),
+    [selectedSuspect, stress, discoveredEvidence]
+  );
+
+  /** Fair-play opening chips before any dialogue (replaces static list when API returns). */
+  useEffect(() => {
     if (loading || !selectedSuspect) return;
-    if (messages.length === 0) {
-      setContextFollowUps([]);
-      return;
-    }
-    const last = messages[messages.length - 1];
-    if (last?.role !== "assistant") return;
+    if (messages.length > 0) return;
 
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => {
@@ -125,34 +144,70 @@ export default function InterrogationRoom() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
-        body: JSON.stringify({
-          suspectId: selectedSuspect,
-          stressLevel: stress,
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        }),
+        body: fetchFollowUpPayload({ openingAngles: true, msgs: [] }),
       })
         .then(async (res) => {
+          if (ctrl.signal.aborted) return;
           if (!res.ok) return;
           const data = (await res.json()) as { questions?: unknown };
+          if (ctrl.signal.aborted) return;
           if (Array.isArray(data.questions)) {
             setContextFollowUps(
               data.questions.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
             );
+            suggestionUsesSinceBatchRef.current = 0;
           }
         })
-        .catch(() => {
-          /* offline / abort — keep prior chips */
+        .catch(() => {})
+        .finally(() => setFollowUpsLoading(false));
+    }, 300);
+
+    return () => {
+      ctrl.abort();
+      window.clearTimeout(timer);
+    };
+  }, [loading, selectedSuspect, messages.length, discoveredEvidence, fetchFollowUpPayload]);
+
+  /** After each suspect reply — refresh transcript suggestions only if the player used enough prior chips. */
+  useEffect(() => {
+    if (loading || !selectedSuspect) return;
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last?.role !== "assistant") return;
+    if (suggestionUsesSinceBatchRef.current < MIN_SUGGESTION_USES_BEFORE_REFRESH) {
+      return;
+    }
+
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => {
+      setFollowUpsLoading(true);
+      fetch("/api/interrogate/suggest-followups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: fetchFollowUpPayload({ openingAngles: false, msgs: messages }),
+      })
+        .then(async (res) => {
+          if (ctrl.signal.aborted) return;
+          if (!res.ok) return;
+          const data = (await res.json()) as { questions?: unknown };
+          if (ctrl.signal.aborted) return;
+          if (Array.isArray(data.questions)) {
+            setContextFollowUps(
+              data.questions.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+            );
+            suggestionUsesSinceBatchRef.current = 0;
+          }
         })
-        .finally(() => {
-          setFollowUpsLoading(false);
-        });
+        .catch(() => {})
+        .finally(() => setFollowUpsLoading(false));
     }, 450);
 
     return () => {
       ctrl.abort();
       window.clearTimeout(timer);
     };
-  }, [messages, loading, selectedSuspect, stress]);
+  }, [messages, loading, selectedSuspect, fetchFollowUpPayload]);
 
   const speakText = useCallback(async (text: string) => {
     if (!audioEnabled.current || !suspect) return;
@@ -299,6 +354,7 @@ export default function InterrogationRoom() {
       : [];
   const bottomStressHint = interrogationBottomStressHint(stress);
 
+  /** Prefer AI chips (opening + transcript); static only if API empty/offline. */
   const mergedSuggestionChips = useMemo(() => {
     const seen = new Set<string>();
     const add = (q: string, kind: "context" | "static") => {
@@ -312,11 +368,14 @@ export default function InterrogationRoom() {
       const row = add(q, "context");
       if (row) out.push(row);
     }
+    if (contextFollowUps.length > 0) {
+      return out.slice(0, MAX_VISIBLE_SUGGESTION_CHIPS);
+    }
     for (const q of [...suggested, ...highStressQs]) {
       const row = add(q, "static");
       if (row) out.push(row);
     }
-    return out.slice(0, 12);
+    return out.slice(0, MAX_VISIBLE_SUGGESTION_CHIPS);
   }, [contextFollowUps, suggested, highStressQs]);
 
   return (
@@ -491,31 +550,34 @@ export default function InterrogationRoom() {
                 </button>
               </div>
 
-              {/* Suggested questions — AI follow-ups from transcript first, then static */}
+              {/* Suggested questions — max 4, white text; new AI batch only after MIN_SUGGESTION_USES_BEFORE_REFRESH chip uses */}
               <div className="flex flex-wrap items-center gap-1.5 mt-2">
                 {followUpsLoading ? (
-                  <span className="text-[9px] italic text-[#445566] px-1">Updating suggestions…</span>
+                  <span className="text-[9px] italic text-[#B8C4D0] px-1 transition-opacity duration-300">
+                    Updating suggestions…
+                  </span>
                 ) : null}
                 {mergedSuggestionChips.map(({ q, kind }, i) => (
                   <button
                     key={`${kind}-${i}-${q.slice(0, 24)}`}
                     type="button"
                     onClick={() => {
+                      suggestionUsesSinceBatchRef.current += 1;
                       setInput(q);
                       inputRef.current?.focus();
                     }}
                     disabled={loading}
-                    className="text-[10px] px-2.5 py-1 rounded transition-colors disabled:opacity-30 text-left max-w-[100%]"
+                    className="text-[10px] px-2.5 py-1 rounded-md text-left max-w-[100%] transition-all duration-200 disabled:opacity-30 hover:bg-white/[0.06]"
                     style={{
-                      background:
-                        kind === "context" ? "rgba(212,168,67,.07)" : "rgba(255,255,255,.03)",
-                      border:
-                        kind === "context"
-                          ? "1px solid rgba(212,168,67,.22)"
-                          : "1px solid rgba(255,255,255,.07)",
-                      color: kind === "context" ? "#A8986E" : "#667788",
+                      background: "rgba(255,255,255,.04)",
+                      border: "1px solid rgba(255,255,255,.1)",
+                      color: "#E8ECF3",
                     }}
-                    title={kind === "context" ? "From this conversation" : "Suggested starter"}
+                    title={
+                      kind === "context"
+                        ? "Suggested from this chat and what you’ve found — not the final answer"
+                        : "Fallback prompt if suggestions are unavailable"
+                    }
                   >
                     {q}
                   </button>

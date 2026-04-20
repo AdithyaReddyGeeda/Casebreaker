@@ -1,9 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  buildEvidencePlaceholderImage,
-} from "@/lib/evidence/images";
+import { EvidenceImageFrame as ExhibitImageFrame } from "@/components/ui/EvidenceImageFrame";
 import { useGameStore } from "@/lib/store";
 import { getDiscoveredEvidence } from "@/lib/evidence/sampleEvidence";
 import type { Evidence } from "@/lib/evidence/types";
@@ -31,50 +29,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       >
         {value}
       </div>
-    </div>
-  );
-}
-
-function EvidenceImageFrame({
-  evidence,
-  size,
-}: {
-  evidence: Evidence;
-  size: "card" | "detail";
-}) {
-  const isDetail = size === "detail";
-  const placeholder = buildEvidencePlaceholderImage(
-    {
-      title: evidence.title,
-      category: evidence.category,
-      status: evidence.status,
-    },
-    { variant: isDetail ? "detail" : "card" }
-  );
-  const imageSrc = evidence.imageUrl || placeholder;
-  const showLoading = evidence.imageStatus === "generating";
-
-  return (
-    <div
-      className={`relative overflow-hidden rounded-lg border border-white/10 bg-black/20 ${
-        isDetail ? "aspect-square w-full" : "h-16 w-16 shrink-0"
-      }`}
-    >
-      <img
-        src={imageSrc}
-        alt={evidence.title}
-        className="h-full w-full object-cover"
-      />
-      {showLoading ? (
-        <>
-          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/5 via-transparent to-white/10" />
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 py-2">
-            <div className="text-[10px] uppercase tracking-[2px] text-[#E8ECF3]">
-              Generating image…
-            </div>
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }
@@ -157,7 +111,7 @@ export default function EvidenceBoard() {
                   }}
                 >
                   <div className="flex items-start gap-3">
-                    <EvidenceImageFrame evidence={item} size="card" />
+                    <ExhibitImageFrame evidence={item} size="card" />
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
@@ -211,7 +165,7 @@ export default function EvidenceBoard() {
             </button>
 
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition-all duration-200">
-              <EvidenceImageFrame evidence={displayedEvidence} size="detail" />
+              <ExhibitImageFrame evidence={displayedEvidence} size="detail" />
 
               <div className="flex items-start justify-between gap-3">
                 <div className="mt-4">
