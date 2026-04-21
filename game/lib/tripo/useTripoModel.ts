@@ -14,6 +14,8 @@ export interface UseTripoModelOptions {
   scale?: number;
   position?: [number, number, number];
   rotation?: [number, number, number];
+  normalizeHumanoid?: boolean;
+  targetHeight?: number;
   fitToBounds?: {
     width: number;
     height?: number;
@@ -41,6 +43,8 @@ export function useTripoModel(
     scale,
     position,
     rotation,
+    normalizeHumanoid = false,
+    targetHeight,
     fitToBounds,
     onLoad,
     onError,
@@ -57,6 +61,10 @@ export function useTripoModel(
 
     try {
       const loadedScene = await manager.current.loadModel(modelId);
+
+      if (normalizeHumanoid) {
+        manager.current.normalizeHumanoid(loadedScene, targetHeight);
+      }
 
       // Apply transformations
       if (scale !== undefined) {

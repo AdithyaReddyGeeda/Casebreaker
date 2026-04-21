@@ -2,26 +2,150 @@
  * Auto Interrogation Scene Component
  *
  * Complete example of automated workflow:
- * Generated Mystery → Assets → Scene Ready
+ * Generated Mystery -> Assets -> Scene Ready
  *
  * Usage:
  * <AutoInterrogationScene mystery={yourGeneratedMystery} />
  */
 
-import { useEffect, useRef, useState } from "react";
+"use client";
+
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import TripoModelLoader, { TripoSceneSetup } from "./TripoModelLoader";
+import TripoModelLoader from "./TripoModelLoader";
 import LipSyncController from "./LipSyncController";
 import { ProfessionalControls } from "./ProfessionalControls";
 import { useMysteryAssets } from "@/lib/mystery/useMysteryAssets";
 import type { GeneratedMystery } from "@/lib/mystery/MysteryToGameAssetsService";
 
+const FRONT_FACING_YAW = -Math.PI / 2;
+
 interface AutoInterrogationSceneProps {
   mystery: GeneratedMystery;
   onReady?: () => void;
   onError?: (error: Error) => void;
+}
+
+interface GeneratedInterrogationStageProps {
+  modelId: string;
+  audioUrl?: string;
+}
+
+function GeneratedInterrogationStage({
+  modelId,
+  audioUrl,
+}: GeneratedInterrogationStageProps) {
+  const controlsRef = useRef<any>(null);
+  const suspectGroupRef = useRef<THREE.Group>(null);
+  const orbitTarget = useMemo<[number, number, number]>(() => [0, 1.18, -0.04], []);
+  const defaultCameraPosition = useMemo<[number, number, number]>(
+    () => [0.02, 1.18, 2.34],
+    []
+  );
+
+  return (
+    <Canvas
+      camera={{ position: defaultCameraPosition, fov: 33, near: 0.1, far: 100 }}
+      style={{ width: "100%", height: "100%" }}
+      shadows
+    >
+      <color attach="background" args={["#000000"]} />
+      <ProfessionalControls
+        controlsRef={controlsRef}
+        focusTarget={orbitTarget}
+        defaultCameraPosition={defaultCameraPosition}
+      />
+
+      <Suspense fallback={null}>
+        <ambientLight intensity={0.08} color="#9fb0c8" />
+        <directionalLight
+          castShadow
+          position={[0.55, 1.95, 1.35]}
+          intensity={1.55}
+          color="#f2ece2"
+        />
+        <pointLight position={[0, 1.38, 1.02]} intensity={1.1} color="#f5efe4" />
+        <spotLight
+          position={[0.08, 1.98, 1.5]}
+          angle={0.28}
+          penumbra={0.95}
+          intensity={2.15}
+          color="#fff7ec"
+          distance={5}
+          decay={1.45}
+          castShadow
+        />
+
+        <mesh position={[0, 1.8, -2.2]}>
+          <planeGeometry args={[10, 4.8]} />
+          <meshStandardMaterial color="#090d12" roughness={0.98} metalness={0.01} />
+        </mesh>
+
+        <mesh position={[-2.8, 1.7, -1.4]} rotation={[0, Math.PI / 2.8, 0]}>
+          <planeGeometry args={[3.8, 3.4]} />
+          <meshStandardMaterial color="#080c10" roughness={0.98} metalness={0.01} />
+        </mesh>
+
+        <mesh position={[2.8, 1.7, -1.4]} rotation={[0, -Math.PI / 2.8, 0]}>
+          <planeGeometry args={[3.8, 3.4]} />
+          <meshStandardMaterial color="#080c10" roughness={0.98} metalness={0.01} />
+        </mesh>
+
+        <group ref={suspectGroupRef} position={[0, 0.42, -0.04]}>
+          <TripoModelLoader
+            modelId={modelId}
+            modelType="suspect"
+            normalizeHumanoid
+            targetHeight={1.72}
+            rotation={[0, FRONT_FACING_YAW, 0]}
+            showLoader
+          />
+        </group>
+
+        {audioUrl && suspectGroupRef.current ? (
+          <LipSyncController
+            suspectModel={suspectGroupRef.current}
+            audioUrl={audioUrl}
+            analyzerMode="deepgram"
+            autoPlay
+            debug={false}
+          />
+        ) : null}
+
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enablePan
+          enableZoom
+          enableRotate
+          screenSpacePanning
+          target={orbitTarget}
+          minDistance={0.95}
+          maxDistance={3}
+          minPolarAngle={0.45}
+          maxPolarAngle={Math.PI / 2 + 0.28}
+          minAzimuthAngle={-Math.PI}
+          maxAzimuthAngle={Math.PI}
+          dampingFactor={0.09}
+          enableDamping
+          rotateSpeed={0.72}
+          zoomSpeed={0.55}
+          panSpeed={0.45}
+          mouseButtons={{
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.PAN,
+          }}
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN,
+          }}
+        />
+      </Suspense>
+    </Canvas>
+  );
 }
 
 export function AutoInterrogationScene({
@@ -31,31 +155,39 @@ export function AutoInterrogationScene({
 }: AutoInterrogationSceneProps) {
   const { assets, isLoading, error, progress, generate } = useMysteryAssets();
   const [selectedSuspect, setSelectedSuspect] = useState<string | null>(null);
-  const roomRef = useRef<THREE.Group>(null);
-  const suspectRef = useRef<THREE.Group>(null);
 
-  // Generate assets on mount
   useEffect(() => {
-    generate(mystery).then(() => {
-      onReady?.();
-    }).catch((err) => {
-      onError?.(err);
-    });
+    generate(mystery)
+      .then(() => {
+        onReady?.();
+      })
+      .catch((err) => {
+        onError?.(err);
+      });
   }, [mystery, generate, onReady, onError]);
+
+  useEffect(() => {
+    if (!assets?.suspects.length) return;
+    if (selectedSuspect) return;
+    setSelectedSuspect(assets.suspects[0].id);
+  }, [assets, selectedSuspect]);
+
+  const activeSuspect =
+    assets?.suspects.find((suspect) => suspect.id === selectedSuspect) ?? assets?.suspects[0] ?? null;
 
   if (error) {
     return (
       <div style={styles.error}>
-        <h2>❌ Error Generating Assets</h2>
+        <h2>Error Generating Assets</h2>
         <p>{error.message}</p>
       </div>
     );
   }
 
-  if (isLoading || !assets) {
+  if (isLoading || !assets || !activeSuspect) {
     return (
       <div style={styles.loading}>
-        <h2>🎬 {mystery.title}</h2>
+        <h2>{mystery.title}</h2>
         <p>{progress}</p>
         <div style={styles.spinner} />
       </div>
@@ -64,58 +196,11 @@ export function AutoInterrogationScene({
 
   return (
     <div style={styles.container}>
-      {/* 3D Scene */}
-      <Canvas
-        camera={{ position: [500, 200, 500], fov: 45 }}
-        style={{ width: "100%", height: "100%" }}
-      >
-        <color attach="background" args={["#0a0a0a"]} />
+      <GeneratedInterrogationStage
+        modelId={activeSuspect.modelId}
+        audioUrl={activeSuspect.audioUrl}
+      />
 
-        {/* Lighting */}
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[15, 20, 15]} intensity={1.4} />
-        <pointLight position={[-10, 7, 6]} intensity={0.8} />
-
-        {/* Room */}
-        <group ref={roomRef}>
-          <TripoModelLoader
-            modelId={assets.room.id}
-            modelType="room"
-            scale={1}
-            position={[0, 0, 0]}
-          />
-        </group>
-
-        {/* Suspects */}
-        <group ref={suspectRef}>
-          {assets.suspects.map((suspect, idx) => (
-            <TripoModelLoader
-              key={suspect.id}
-              modelId={suspect.modelId}
-              modelType="suspect"
-              scale={27}
-              position={[idx * 10 - 5, 95, 20]}
-            />
-          ))}
-        </group>
-
-        {/* Lip Sync for Selected Suspect */}
-        {selectedSuspect && suspectRef.current && (
-          <LipSyncController
-            suspectModel={suspectRef.current}
-            audioUrl={assets.suspects.find((s) => s.id === selectedSuspect)?.audioUrl}
-            analyzerMode="deepgram"
-            autoPlay={true}
-            debug={false}
-          />
-        )}
-
-        {/* Camera Controls */}
-        <ProfessionalControls />
-        <OrbitControls />
-      </Canvas>
-
-      {/* Suspect Selection UI */}
       <div style={styles.ui}>
         <h3 style={styles.title}>{assets.title}</h3>
         <div style={styles.suspectList}>
@@ -126,18 +211,16 @@ export function AutoInterrogationScene({
               style={{
                 ...styles.suspectButton,
                 backgroundColor:
-                  selectedSuspect === suspect.id ? "#ffd700" : "#333",
-                color: selectedSuspect === suspect.id ? "#000" : "#fff",
+                  activeSuspect.id === suspect.id ? "#ffd700" : "#333",
+                color: activeSuspect.id === suspect.id ? "#000" : "#fff",
               }}
             >
-              🕵️ {suspect.originalData.name}
+              {suspect.originalData.name}
             </button>
           ))}
         </div>
         <p style={styles.status}>
-          {selectedSuspect
-            ? "▶️ Playing suspect dialogue..."
-            : "👆 Click a suspect to interrogate"}
+          Interrogating {activeSuspect.originalData.name}
         </p>
       </div>
     </div>

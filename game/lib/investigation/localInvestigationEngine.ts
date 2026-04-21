@@ -3,6 +3,7 @@ import type {
   InterrogationResult,
   InterrogationStreamChunk,
   SpeakRequest,
+  SpeakSynthesisResult,
 } from "./types";
 import type { InterrogationTurnStoreSnapshot } from "./interrogationTurn";
 import type { InvestigationEngine } from "./investigationEngine.types";
@@ -82,15 +83,25 @@ export class LocalInvestigationEngine implements InvestigationEngine {
 
   async synthesizeSpeech(
     params: SpeakRequest
-  ): Promise<{ audioBase64: string } | null> {
+  ): Promise<SpeakSynthesisResult | null> {
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: params.text, voiceId: params.voiceId }),
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { audio?: string };
+    const data = (await res.json()) as {
+      audio?: string;
+      characterTimestamps?: SpeakSynthesisResult["characterTimestamps"];
+      visemeTimeline?: SpeakSynthesisResult["visemeTimeline"];
+      provider?: string;
+    };
     if (!data.audio) return null;
-    return { audioBase64: data.audio };
+    return {
+      audioBase64: data.audio,
+      characterTimestamps: data.characterTimestamps ?? null,
+      visemeTimeline: data.visemeTimeline ?? null,
+      provider: data.provider,
+    };
   }
 }

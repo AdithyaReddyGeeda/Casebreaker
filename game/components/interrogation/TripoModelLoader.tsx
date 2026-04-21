@@ -7,7 +7,6 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { useThree } from "@react-three/fiber";
 import { useTripoModel } from "@/lib/tripo/useTripoModel";
 import { TripoModelManager, type TripoModel } from "@/lib/tripo/TripoModelManager";
 
@@ -26,6 +25,12 @@ export interface TripoModelLoaderProps {
 
   /** Rotation in radians */
   rotation?: [number, number, number];
+
+  /** Normalize a humanoid model to a floor-grounded neutral presentation */
+  normalizeHumanoid?: boolean;
+
+  /** Approximate world-space height after normalization */
+  targetHeight?: number;
 
   /** Auto-fit to bounds */
   fitToBounds?: { width: number; height?: number };
@@ -49,15 +54,18 @@ export function TripoModelLoader({
   scale,
   position = [0, 0, 0],
   rotation = [0, 0, 0],
+  normalizeHumanoid = false,
+  targetHeight,
   fitToBounds,
   onLoad,
   onError,
   showLoader = true,
 }: TripoModelLoaderProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const { scene } = useThree();
   const { scene: loadedScene, isLoading, error } = useTripoModel(modelId, {
     scale,
+    normalizeHumanoid,
+    targetHeight,
     fitToBounds,
     onLoad,
     onError,

@@ -3,6 +3,12 @@ import {
   SynthesizeSpeechCommand,
   type VoiceId,
 } from "@aws-sdk/client-polly";
+import {
+  approxVisemeTimelineFromText,
+  buildCharacterTimestampsFromText,
+  type CharacterTimestampRange,
+  type VisemeTimeline,
+} from "@/lib/character/character-pipeline";
 
 export const runtime = "nodejs";
 
@@ -34,13 +40,10 @@ function parseElevenLabsTimestamps(alignment: ElevenLabsAlignment | undefined): 
 }
 
 function buildFallbackTimestamps(text: string, durationMs: number): CharacterTimestamp[] {
-  const chars = Array.from(text);
-  if (!chars.length) return [];
-  const perChar = Math.max(20, durationMs / chars.length);
-  return chars.map((char, i) => ({
-    char,
-    startMs: Math.round(i * perChar),
-    endMs: Math.round((i + 1) * perChar),
+  return buildCharacterTimestampsFromText(text, durationMs).map((item) => ({
+    char: item.char,
+    startMs: item.startMs,
+    endMs: item.endMs,
   }));
 }
 
@@ -64,9 +67,11 @@ async function elevenlabs(text: string, voiceId: string) {
     const data = await res.json() as { audio_base64?: string; alignment?: ElevenLabsAlignment; normalized_alignment?: ElevenLabsAlignment };
     if (!data.audio_base64) return null;
     const ts = parseElevenLabsTimestamps(data.alignment ?? data.normalized_alignment);
+    const visemeTimeline = approxVisemeTimelineFromText(text, "elevenlabs-approx");
     return {
       audio: data.audio_base64,
-      characterTimestamps: ts.length > 0 ? ts : buildFallbackTimestamps(text, text.length * 80),
+      characterTimestamps: ts.length > 0 ? ts : buildFallbackTimestamps(text, visemeTimeline.durationMs),
+      visemeTimeline,
       provider: "elevenlabs",
     };
   } catch (e) { console.warn("ElevenLabs error:", e); return null; }
@@ -84,12 +89,57 @@ async function polly(text: string) {
     }));
     if (!audioRes.AudioStream) return null;
     const bytes = Buffer.from(await audioRes.AudioStream.transformToByteArray());
+    const visemeRes = await client.send(new SynthesizeSpeechCommand({
+      Engine: "neural",
+      LanguageCode: "en-GB",
+      VoiceId: voiceId,
+      OutputFormat: "json",
+      SpeechMarkTypes: ["viseme"],
+      Text: text,
+      TextType: "text",
+    }));
+    const durationMs = Math.max(1200, text.length * 55);
+    const visemeRaw = visemeRes.AudioStream
+      ? Buffer.from(await visemeRes.AudioStream.transformToByteArray()).toString("utf8")
+      : "";
+    const visemeTimeline = parsePollyVisemes(visemeRaw, durationMs);
     return {
       audio: bytes.toString("base64"),
-      characterTimestamps: buildFallbackTimestamps(text, text.length * 80),
+      characterTimestamps: buildFallbackTimestamps(text, visemeTimeline?.durationMs ?? durationMs),
+      visemeTimeline,
       provider: "aws-polly",
     };
   } catch (e) { console.warn("Polly error:", e); return null; }
+}
+
+function parsePollyVisemes(raw: string, durationMs: number): VisemeTimeline | null {
+  if (!raw.trim()) return null;
+
+  const events = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as { time?: number; value?: string };
+      } catch {
+        return null;
+      }
+    })
+    .filter((item): item is { time?: number; value?: string } => Boolean(item))
+    .map((item) => ({
+      timeMs: Math.max(0, item.time ?? 0),
+      viseme: item.value ?? "aa",
+      strength: 0.85,
+    }));
+
+  if (!events.length) return null;
+
+  return {
+    provider: "aws-polly",
+    durationMs,
+    events,
+  };
 }
 
 export async function POST(req: Request) {
@@ -100,7 +150,22 @@ export async function POST(req: Request) {
     const result = (await elevenlabs(text, voiceId)) ?? (await polly(text));
     if (!result) return new Response(JSON.stringify({ error: "All TTS providers unavailable" }), { status: 503 });
 
-    return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
+    const characterTimestamps: CharacterTimestampRange[] | null = result.characterTimestamps
+      ? result.characterTimestamps.map((item) => ({
+          char: item.char,
+          startMs: item.startMs,
+          endMs: item.endMs,
+        }))
+      : null;
+
+    return new Response(
+      JSON.stringify({
+        ...result,
+        characterTimestamps,
+        visemeTimeline: result.visemeTimeline ?? null,
+      }),
+      { headers: { "Content-Type": "application/json" } }
+    );
   } catch (e) {
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "error" }), { status: 500 });
   }

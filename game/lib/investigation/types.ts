@@ -5,6 +5,10 @@ import type {
   Suspect,
   SuspectId,
 } from "@/lib/cases/harlow-manor";
+import type {
+  CharacterTimestampRange,
+  VisemeTimeline,
+} from "@/lib/character/character-pipeline";
 
 /** Static case definition used by the Harlow Manor build (re-export for service consumers). */
 export type GameCase = Case;
@@ -94,6 +98,13 @@ export interface ResolvedVerdict {
 export interface SpeakRequest {
   text: string;
   voiceId: string;
+}
+
+export interface SpeakSynthesisResult {
+  audioBase64: string;
+  characterTimestamps: CharacterTimestampRange[] | null;
+  visemeTimeline: VisemeTimeline | null;
+  provider?: string;
 }
 
 export interface CaseSession {

@@ -3,6 +3,7 @@ import type {
   InterrogationResult,
   InterrogationStreamChunk,
   SpeakRequest,
+  SpeakSynthesisResult,
 } from "./types";
 import type { InterrogationTurnStoreSnapshot } from "./interrogationTurn";
 
@@ -19,5 +20,5 @@ export interface InvestigationEngine {
     sessionContext?: InterrogationTurnStoreSnapshot
   ): Promise<InterrogationResult>;
 
-  synthesizeSpeech(params: SpeakRequest): Promise<{ audioBase64: string } | null>;
+  synthesizeSpeech(params: SpeakRequest): Promise<SpeakSynthesisResult | null>;
 }

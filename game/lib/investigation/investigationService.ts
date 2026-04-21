@@ -7,6 +7,7 @@ import type {
   InterrogationStreamChunk,
   ResolvedVerdict,
   SpeakRequest,
+  SpeakSynthesisResult,
   VerdictResult,
 } from "./types";
 import type { InterrogationTurnStoreSnapshot } from "./interrogationTurn";
@@ -86,7 +87,7 @@ export function getVerdict(
 /** TTS via the active engine (defaults to Next `/api/speak`). */
 export async function synthesizeSpeech(
   params: SpeakRequest
-): Promise<{ audioBase64: string } | null> {
+): Promise<SpeakSynthesisResult | null> {
   return getInvestigationEngine().synthesizeSpeech(params);
 }
 

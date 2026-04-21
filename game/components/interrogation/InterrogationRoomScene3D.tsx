@@ -1,125 +1,140 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import * as THREE from "three";
 import type { EvidenceId, SuspectId } from "@/lib/cases/harlow-manor";
+import type {
+  CharacterTimestampRange,
+  VisemeTimeline,
+} from "@/lib/character/character-pipeline";
+import SuspectCharacterScene from "@/components/character/SuspectCharacterScene";
 import { ProfessionalControls } from "./ProfessionalControls";
-
-const SUSPECT_TINT: Record<SuspectId, string> = {
-  fenn: "#4A6670",
-  victoria: "#6B4A5A",
-  oliver: "#4A5A6B",
-};
 
 type SceneProps = {
   suspectId: SuspectId;
   evidenceIds: readonly EvidenceId[];
+  speaking: boolean;
   stressed: boolean;
+  characterTimestamps?: CharacterTimestampRange[] | null;
+  visemeTimeline?: VisemeTimeline | null;
+  speechElapsedMs?: number;
 };
 
-/** Procedural room + figure — no external .glb (optional: drop models under public/models/ later). */
-function InterrogationPlaceholderScene({ suspectId, evidenceIds, stressed }: SceneProps) {
-  const tint = SUSPECT_TINT[suspectId];
+function InterrogationRoomScene({
+  suspectId,
+  speaking,
+  stressed,
+  characterTimestamps,
+  visemeTimeline,
+  speechElapsedMs,
+}: SceneProps) {
   const accent = stressed ? "#c05040" : "#D4A843";
-  const evidenceSlots = useMemo(() => evidenceIds.slice(0, 8), [evidenceIds]);
 
   return (
     <group>
-      <ambientLight intensity={0.45} />
-      <directionalLight castShadow position={[3.5, 6, 4]} intensity={1.15} />
-      <pointLight position={[-2.5, 2.5, 1.5]} intensity={stressed ? 0.55 : 0.35} color={accent} />
+      <ambientLight intensity={0.08} color="#9fb0c8" />
+      <directionalLight
+        castShadow
+        position={[0.55, 1.95, 1.35]}
+        intensity={1.55}
+        color="#f2ece2"
+      />
+      <pointLight position={[0, 1.38, 1.02]} intensity={1.1} color="#f5efe4" />
+      <pointLight position={[-0.55, 1.22, 0.6]} intensity={stressed ? 0.42 : 0.18} color={accent} />
+      <spotLight
+        position={[0.1, 2.0, 1.55]}
+        angle={0.34}
+        penumbra={0.95}
+        intensity={2.3}
+        color="#fff7ec"
+        distance={5}
+        decay={1.4}
+        castShadow
+        target-position={[0, 1.16, -0.02]}
+      />
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
-        <planeGeometry args={[10, 10]} />
-        <meshStandardMaterial color="#070e14" roughness={0.92} metalness={0.05} />
+      <mesh position={[0, 1.8, -2.2]}>
+        <planeGeometry args={[10, 4.8]} />
+        <meshStandardMaterial color="#090d12" roughness={0.98} metalness={0.01} />
       </mesh>
 
-      <group position={[0, 0, -0.42]}>
-        <mesh castShadow position={[0, 0.22, 0]}>
-          <boxGeometry args={[0.52, 0.42, 0.09]} />
-          <meshStandardMaterial color="#2a2220" roughness={0.75} />
-        </mesh>
-        <mesh castShadow position={[0, 0.02, 0.2]}>
-          <boxGeometry args={[0.52, 0.08, 0.42]} />
-          <meshStandardMaterial color="#2a2220" roughness={0.75} />
-        </mesh>
-      </group>
+      <mesh position={[-2.8, 1.7, -1.4]} rotation={[0, Math.PI / 2.8, 0]}>
+        <planeGeometry args={[3.8, 3.4]} />
+        <meshStandardMaterial color="#080c10" roughness={0.98} metalness={0.01} />
+      </mesh>
 
-      <group position={[0, 0.12, -0.18]} rotation={[0.12, 0, 0]}>
-        <mesh castShadow position={[0, 0.32, 0]}>
-          <boxGeometry args={[0.34, 0.52, 0.22]} />
-          <meshStandardMaterial
-            color={tint}
-            roughness={0.62}
-            metalness={0.12}
-            emissive={tint}
-            emissiveIntensity={0.12}
-          />
-        </mesh>
-        <mesh castShadow position={[0, 0.72, 0.04]}>
-          <sphereGeometry args={[0.11, 20, 20]} />
-          <meshStandardMaterial color="#c4b4a4" roughness={0.55} />
-        </mesh>
-      </group>
+      <mesh position={[2.8, 1.7, -1.4]} rotation={[0, -Math.PI / 2.8, 0]}>
+        <planeGeometry args={[3.8, 3.4]} />
+        <meshStandardMaterial color="#080c10" roughness={0.98} metalness={0.01} />
+      </mesh>
 
-      <group position={[0, 0, 0.38]}>
-        <mesh castShadow position={[0, 0.52, 0]}>
-          <boxGeometry args={[1.2, 0.06, 0.52]} />
-          <meshStandardMaterial color="#1a1412" roughness={0.55} metalness={0.15} />
-        </mesh>
-        {[
-          [-0.48, 0.22],
-          [0.48, 0.22],
-          [-0.48, -0.22],
-          [0.48, -0.22],
-        ].map(([x, z], i) => (
-          <mesh key={i} castShadow position={[x, 0.24, z]}>
-            <cylinderGeometry args={[0.04, 0.045, 0.48, 8]} />
-            <meshStandardMaterial color="#14100e" roughness={0.65} />
-          </mesh>
-        ))}
+      <group position={[0, 0.42, -0.04]}>
+        <SuspectCharacterScene
+          suspectId={suspectId}
+          speaking={speaking}
+          stressed={stressed}
+          characterTimestamps={characterTimestamps}
+          visemeTimeline={visemeTimeline}
+          speechElapsedMs={speechElapsedMs}
+          presentation="standing"
+        />
       </group>
-
-      {evidenceSlots.map((id, i) => {
-        const spread = Math.min(Math.max(evidenceSlots.length, 1), 6);
-        const idx = i % spread;
-        const x = (idx - (spread - 1) / 2) * 0.22;
-        const row = Math.floor(i / spread);
-        const zOff = row * 0.14;
-        return (
-          <mesh key={`${id}-${i}`} castShadow position={[x, 0.58, 0.38 + zOff]}>
-            <boxGeometry args={[0.1, 0.06, 0.12]} />
-            <meshStandardMaterial color="#D4A843" roughness={0.4} metalness={0.35} />
-          </mesh>
-        );
-      })}
     </group>
   );
 }
 
 function InterrogationRoom3D(props: SceneProps) {
+  const controlsRef = useRef<any>(null);
+  const orbitTarget = useMemo<[number, number, number]>(() => [0, 1.18, -0.04], []);
+  const defaultCameraPosition = useMemo<[number, number, number]>(
+    () => [0.02, 1.18, 2.34],
+    []
+  );
+
   return (
     <Canvas
-      camera={{ position: [2.2, 1.35, 2.8], fov: 45, near: 0.1, far: 100 }}
+      camera={{ position: defaultCameraPosition, fov: 33, near: 0.1, far: 100 }}
       style={{ width: "100%", height: "100%" }}
       shadows
     >
-      <color attach="background" args={["#0a0f14"]} />
-      <ProfessionalControls />
+      <color attach="background" args={["#000000"]} />
+      <ProfessionalControls
+        controlsRef={controlsRef}
+        focusTarget={orbitTarget}
+        defaultCameraPosition={defaultCameraPosition}
+      />
       <Suspense fallback={null}>
-        <InterrogationPlaceholderScene {...props} />
+        <InterrogationRoomScene {...props} />
         <OrbitControls
+          ref={controlsRef}
+          makeDefault
           enablePan
           enableZoom
           enableRotate
-          minDistance={0.85}
-          maxDistance={9}
-          dampingFactor={0.06}
+          screenSpacePanning
+          target={orbitTarget}
+          minDistance={0.95}
+          maxDistance={3}
+          minPolarAngle={0.45}
+          maxPolarAngle={Math.PI / 2 + 0.28}
+          minAzimuthAngle={-Math.PI}
+          maxAzimuthAngle={Math.PI}
+          dampingFactor={0.09}
           enableDamping
-          rotateSpeed={0.7}
-          zoomSpeed={0.08}
-          panSpeed={0.5}
+          rotateSpeed={0.72}
+          zoomSpeed={0.55}
+          panSpeed={0.45}
+          mouseButtons={{
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.PAN,
+          }}
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY_PAN,
+          }}
         />
       </Suspense>
     </Canvas>

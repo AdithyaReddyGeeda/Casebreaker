@@ -5,6 +5,7 @@ import type {
   InterrogationResult,
   InterrogationStreamChunk,
   SpeakRequest,
+  SpeakSynthesisResult,
 } from "./types";
 import type { InterrogationTurnStoreSnapshot } from "./interrogationTurn";
 import type { InvestigationEngine } from "./investigationEngine.types";
@@ -74,7 +75,7 @@ export class BackendInvestigationEngine implements InvestigationEngine {
 
   async synthesizeSpeech(
     params: SpeakRequest
-  ): Promise<{ audioBase64: string } | null> {
+  ): Promise<SpeakSynthesisResult | null> {
     return this.local.synthesizeSpeech(params);
   }
 }

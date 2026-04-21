@@ -154,6 +154,29 @@ export class TripoModelManager {
     scene.scale.set(factor, factor, factor);
   }
 
+  // ========== NORMALIZE HUMANOID ==========
+  normalizeHumanoid(scene: THREE.Group, targetHeight = 1.72): void {
+    scene.updateMatrixWorld(true);
+
+    const initialBox = new THREE.Box3().setFromObject(scene);
+    const initialSize = initialBox.getSize(new THREE.Vector3());
+
+    if (initialSize.y > 0.001) {
+      const uniformScale = targetHeight / initialSize.y;
+      scene.scale.multiplyScalar(uniformScale);
+      scene.updateMatrixWorld(true);
+    }
+
+    const box = new THREE.Box3().setFromObject(scene);
+    const center = box.getCenter(new THREE.Vector3());
+    const clearance = 0.08;
+
+    scene.position.x -= center.x;
+    scene.position.z -= center.z;
+    scene.position.y += clearance - box.min.y;
+    scene.updateMatrixWorld(true);
+  }
+
   // ========== POSITION MODEL ==========
   positionModel(
     scene: THREE.Group,

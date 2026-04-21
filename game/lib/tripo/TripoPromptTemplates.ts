@@ -55,6 +55,47 @@ export interface EvidenceDescription {
   detail?: string;
 }
 
+function getAgeDescriptor(age: number) {
+  if (age <= 24) return "very young adult";
+  if (age <= 32) return "young adult";
+  if (age <= 44) return "adult";
+  if (age <= 58) return "middle-aged adult";
+  return "older adult";
+}
+
+function getBuildDescriptor(suspect: SuspectDescription) {
+  const text = [
+    suspect.appearance.facialFeatures,
+    suspect.appearance.distinctive,
+    suspect.clothing,
+    suspect.hairstyle,
+    suspect.emotion,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (/(gaunt|thin|narrow|slim|bony|haggard)/.test(text)) return "lean build";
+  if (/(broad|strong|stocky|heavy|solid)/.test(text)) return "broad build";
+  return suspect.gender === "female" ? "graceful build" : "average build";
+}
+
+function describeVisualIdentity(suspect: SuspectDescription) {
+  return [
+    `${suspect.name}`,
+    `${getAgeDescriptor(suspect.age)}`,
+    `${suspect.gender}`,
+    suspect.ethnicity ? `${suspect.ethnicity}` : "",
+    getBuildDescriptor(suspect),
+    suspect.hairstyle ? `hair: ${suspect.hairstyle}` : "",
+    suspect.appearance.facialFeatures ? `face: ${suspect.appearance.facialFeatures}` : "",
+    suspect.appearance.distinctive ? `distinctive: ${suspect.appearance.distinctive}` : "",
+    suspect.clothing ? `clothing: ${suspect.clothing}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
 // ========== SUSPECT HEAD PROMPT TEMPLATE ==========
 export const generateSuspectPrompt = (suspect: SuspectDescription): string => {
   const emotion_descriptors: Record<string, string> = {
@@ -83,6 +124,35 @@ export const generateSuspectPrompt = (suspect: SuspectDescription): string => {
   ];
 
   return parts.filter(p => p).join(". ") + ".";
+};
+
+export const generateSuspectPromptForCast = (
+  suspect: SuspectDescription,
+  cast: SuspectDescription[]
+): string => {
+  const basePrompt = generateSuspectPrompt(suspect);
+  const otherSuspects = cast.filter((item) => item.name !== suspect.name);
+  const contrastBrief = otherSuspects
+    .slice(0, 3)
+    .map((item) => describeVisualIdentity(item))
+    .join(" | ");
+
+  const uniquenessRules = [
+    "Generate exactly one suspect character only",
+    "This character must be clearly visually distinct from every other suspect in the cast",
+    "Use a unique face shape, hair silhouette, age read, body type, and clothing silhouette",
+    "Do not reuse the same male archetype for multiple male suspects",
+    "Do not create duplicate hairstyles, duplicate face shapes, or near-identical outfits across suspects",
+    "Neutral standing pose, full body, centered, isolated subject, no props, no environment",
+  ];
+
+  const contrastLine = contrastBrief
+    ? `Other suspects to avoid resembling: ${contrastBrief}`
+    : "";
+
+  return [basePrompt, contrastLine, ...uniquenessRules]
+    .filter(Boolean)
+    .join(". ") + ".";
 };
 
 // ========== INTERROGATION ROOM PROMPT TEMPLATE ==========

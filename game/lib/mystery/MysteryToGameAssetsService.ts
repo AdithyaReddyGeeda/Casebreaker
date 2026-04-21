@@ -10,7 +10,11 @@
  * ONE SERVICE TO RULE THEM ALL 🎬
  */
 
-import { generateSuspectPrompt, generateRoomPrompt, generateEvidencePrompt } from "@/lib/tripo/TripoPromptTemplates";
+import {
+  generateSuspectPromptForCast,
+  generateRoomPrompt,
+  generateEvidencePrompt,
+} from "@/lib/tripo/TripoPromptTemplates";
 import { registerTripoModels } from "@/components/interrogation/TripoModelLoader";
 import { AudioAnalyzerManager } from "@/lib/lipsync/AudioAnalyzer";
 import type { SuspectDescription, RoomDescription, EvidenceDescription } from "@/lib/tripo/TripoPromptTemplates";
@@ -64,19 +68,16 @@ export interface GameAssets {
  * Main Service Class
  */
 export class MysteryToGameAssetsService {
-  private tripoApiKey: string;
   private elevenLabsApiKey: string;
   private elevenLabsVoiceId: string;
   private deepgramApiKey: string;
   private audioAnalyzer: AudioAnalyzerManager | null = null;
 
   constructor(config: {
-    tripoApiKey: string;
     elevenLabsApiKey: string;
     elevenLabsVoiceId: string;
     deepgramApiKey: string;
   }) {
-    this.tripoApiKey = config.tripoApiKey;
     this.elevenLabsApiKey = config.elevenLabsApiKey;
     this.elevenLabsVoiceId = config.elevenLabsVoiceId;
     this.deepgramApiKey = config.deepgramApiKey;
@@ -87,6 +88,22 @@ export class MysteryToGameAssetsService {
     } catch (error) {
       console.error("Failed to initialize audio analyzer:", error);
     }
+  }
+
+  private slugify(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+  }
+
+  private getFallbackSuspectModelPath(suspect: SuspectDescription): string {
+    if (suspect.gender === "female") {
+      return "/models/character.glb";
+    }
+
+    return suspect.age >= 42 ? "/models/dr_fenn_tripo.glb" : "/models/brian.glb";
   }
 
   /**
@@ -146,12 +163,18 @@ export class MysteryToGameAssetsService {
 
     // Generate suspect models
     for (const suspect of mystery.suspects) {
+      const suspectSlug = this.slugify(suspect.name);
+      const modelId = `suspect-${suspectSlug}`;
+      const fallbackModelPath = this.getFallbackSuspectModelPath(suspect);
+
       try {
-        const prompt = generateSuspectPrompt(suspect);
+        const prompt = generateSuspectPromptForCast(suspect, mystery.suspects);
         console.log(`   Generating: ${suspect.name}...`);
 
-        const modelUrl = await this.callTripoAPI(prompt);
-        const modelId = `suspect-${suspect.name.toLowerCase().replace(/\s+/g, "-")}`;
+        const modelUrl = await this.callTripoAPI(prompt, {
+          cacheKey: `${mystery.caseId}-${modelId}`,
+          fallbackModelPath,
+        });
 
         models.push({
           id: modelId,
@@ -160,12 +183,10 @@ export class MysteryToGameAssetsService {
         });
       } catch (error) {
         console.warn(`   ⚠️ Failed to generate model for ${suspect.name}, using placeholder:`, error);
-        // Use placeholder model when Tripo fails
-        const modelId = `suspect-${suspect.name.toLowerCase().replace(/\s+/g, "-")}`;
         models.push({
           id: modelId,
           name: suspect.name,
-          url: "placeholder://suspect-model", // Placeholder URL
+          url: fallbackModelPath,
         });
       }
     }
@@ -175,7 +196,9 @@ export class MysteryToGameAssetsService {
       const roomPrompt = generateRoomPrompt(mystery.room);
       console.log(`   Generating: Room...`);
 
-      const roomUrl = await this.callTripoAPI(roomPrompt);
+      const roomUrl = await this.callTripoAPI(roomPrompt, {
+        cacheKey: `${mystery.caseId}-room`,
+      });
       models.push({
         id: `room-${mystery.caseId}`,
         name: "Interrogation Room",
@@ -197,14 +220,26 @@ export class MysteryToGameAssetsService {
   /**
    * Call Tripo API via server-side endpoint to avoid CORS issues
    */
-  private async callTripoAPI(prompt: string): Promise<string> {
+  private async callTripoAPI(
+    prompt: string,
+    options?: {
+      cacheKey?: string;
+      fallbackModelPath?: string;
+      regenerate?: boolean;
+    }
+  ): Promise<string> {
     try {
       const response = await fetch("/api/tripo/generate-model", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          cacheKey: options?.cacheKey,
+          fallbackModelPath: options?.fallbackModelPath,
+          regenerate: options?.regenerate,
+        }),
       });
 
       if (!response.ok) {
@@ -212,8 +247,18 @@ export class MysteryToGameAssetsService {
         throw new Error(`Tripo API error: ${error.error}`);
       }
 
-      const result = await response.json();
-      return result.modelUrl;
+      const result = (await response.json()) as {
+        modelUrl?: string;
+        modelPath?: string;
+        error?: string;
+      };
+      const modelUrl = result.modelUrl ?? result.modelPath;
+
+      if (!modelUrl) {
+        throw new Error(result.error ?? "Tripo API returned no model URL.");
+      }
+
+      return modelUrl;
     } catch (error) {
       console.error("Tripo API call failed:", error);
       throw error;
@@ -388,7 +433,6 @@ I didn't kill anyone. This is a terrible mistake.
 let serviceInstance: MysteryToGameAssetsService | null = null;
 
 export function initializeMysteryService(config: {
-  tripoApiKey: string;
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   deepgramApiKey: string;

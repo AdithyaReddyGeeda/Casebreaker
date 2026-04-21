@@ -39,7 +39,7 @@ You're tired. Here's the EXACT steps. Just follow them.
 Create/edit `.env.local` in your project root:
 
 ```
-NEXT_PUBLIC_TRIPO_API_KEY=your_tripo_key_here
+TRIPO_API_KEY=your_tripo_key_here
 NEXT_PUBLIC_ELEVENLABS_API_KEY=your_elevenlabs_key_here
 NEXT_PUBLIC_ELEVENLABS_VOICE_ID=bella
 NEXT_PUBLIC_DEEPGRAM_API_KEY=your_deepgram_key_here
@@ -59,7 +59,6 @@ import { initializeMysteryService } from "@/game/lib/mystery/MysteryToGameAssets
 // Run once at startup
 useEffect(() => {
   initializeMysteryService({
-    tripoApiKey: process.env.NEXT_PUBLIC_TRIPO_API_KEY!,
     elevenLabsApiKey: process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY!,
     elevenLabsVoiceId: process.env.NEXT_PUBLIC_ELEVENLABS_VOICE_ID!,
     deepgramApiKey: process.env.NEXT_PUBLIC_DEEPGRAM_API_KEY!,

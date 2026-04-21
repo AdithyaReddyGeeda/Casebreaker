@@ -4,6 +4,12 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/store";
 import { interrogateSuspect, synthesizeSpeech } from "@/lib/investigation";
+import {
+  approxVisemeTimelineFromText,
+  buildCharacterTimestampsFromText,
+  type CharacterTimestampRange,
+  type VisemeTimeline,
+} from "@/lib/character/character-pipeline";
 import { getSuspect } from "@/lib/cases/harlow-manor";
 import type { SuspectId, EvidenceId } from "@/lib/cases/harlow-manor";
 import type { Message } from "@/lib/store";
@@ -69,11 +75,19 @@ export default function InterrogationRoom() {
   const [loading, setLoading] = useState(false);
   const [displayText, setDisplayText] = useState("");
   const [speaking, setSpeaking] = useState(false);
+  const [characterTimestamps, setCharacterTimestamps] = useState<CharacterTimestampRange[] | null>(
+    null
+  );
+  const [visemeTimeline, setVisemeTimeline] = useState<VisemeTimeline | null>(null);
+  const [speechElapsedMs, setSpeechElapsedMs] = useState(0);
   const [contextFollowUps, setContextFollowUps] = useState<string[]>([]);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const audioEnabled = useRef(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speechFrameRef = useRef<number | null>(null);
+  const speechStartRef = useRef<number | null>(null);
   /** Counts clicks on suggestion chips since the last batch was loaded from the API. */
   const suggestionUsesSinceBatchRef = useRef(0);
 
@@ -119,6 +133,45 @@ export default function InterrogationRoom() {
     setContextFollowUps([]);
     suggestionUsesSinceBatchRef.current = 0;
   }, [selectedSuspect]);
+
+  const stopSpeechClock = useCallback(() => {
+    if (speechFrameRef.current != null) {
+      window.cancelAnimationFrame(speechFrameRef.current);
+      speechFrameRef.current = null;
+    }
+    speechStartRef.current = null;
+    setSpeechElapsedMs(0);
+  }, []);
+
+  const startSpeechClock = useCallback(() => {
+    stopSpeechClock();
+    const startedAt = performance.now();
+    speechStartRef.current = startedAt;
+
+    const tick = () => {
+      if (speechStartRef.current == null) return;
+      setSpeechElapsedMs(Math.max(0, performance.now() - speechStartRef.current));
+      speechFrameRef.current = window.requestAnimationFrame(tick);
+    };
+
+    speechFrameRef.current = window.requestAnimationFrame(tick);
+  }, [stopSpeechClock]);
+
+  const finalizeSpeechPlayback = useCallback(() => {
+    stopSpeechClock();
+    audioRef.current = null;
+    setSpeaking(false);
+  }, [stopSpeechClock]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      finalizeSpeechPlayback();
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [finalizeSpeechPlayback]);
 
   const fetchFollowUpPayload = useCallback(
     (opts: { openingAngles: boolean; msgs: Message[] }) =>
@@ -211,26 +264,58 @@ export default function InterrogationRoom() {
 
   const speakText = useCallback(async (text: string) => {
     if (!audioEnabled.current || !suspect) return;
+    audioRef.current?.pause();
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     setSpeaking(true);
-    const safetyTimer = setTimeout(() => setSpeaking(false), Math.max(8000, text.length * 80));
+    const fallbackTimeline = approxVisemeTimelineFromText(text, "local-fallback");
+    const fallbackCharacterTimestamps = buildCharacterTimestampsFromText(
+      text,
+      fallbackTimeline.durationMs
+    );
+    const safetyTimer = setTimeout(() => finalizeSpeechPlayback(), Math.max(8000, text.length * 80));
     try {
       const out = await synthesizeSpeech({ text, voiceId: suspect.voiceId });
       if (!out) throw new Error("speak unavailable");
+      setCharacterTimestamps(out.characterTimestamps ?? fallbackCharacterTimestamps);
+      setVisemeTimeline(out.visemeTimeline ?? fallbackTimeline);
+      startSpeechClock();
+
       const el = new Audio(`data:audio/mpeg;base64,${out.audioBase64}`);
-      el.onended = () => { clearTimeout(safetyTimer); setSpeaking(false); };
-      el.onerror = () => { clearTimeout(safetyTimer); setSpeaking(false); };
-      el.play().catch(() => { clearTimeout(safetyTimer); setSpeaking(false); });
+      audioRef.current = el;
+      el.onended = () => {
+        clearTimeout(safetyTimer);
+        finalizeSpeechPlayback();
+      };
+      el.onerror = () => {
+        clearTimeout(safetyTimer);
+        finalizeSpeechPlayback();
+      };
+      el.play().catch(() => {
+        clearTimeout(safetyTimer);
+        finalizeSpeechPlayback();
+      });
     } catch {
+      setCharacterTimestamps(fallbackCharacterTimestamps);
+      setVisemeTimeline(fallbackTimeline);
+      startSpeechClock();
       if ("speechSynthesis" in window) {
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9; utterance.pitch = 0.85; utterance.lang = "en-GB";
-        utterance.onend = () => { clearTimeout(safetyTimer); setSpeaking(false); };
+        utterance.rate = 0.9;
+        utterance.pitch = 0.85;
+        utterance.lang = "en-GB";
+        utterance.onend = () => {
+          clearTimeout(safetyTimer);
+          finalizeSpeechPlayback();
+        };
         window.speechSynthesis.speak(utterance);
       } else {
-        clearTimeout(safetyTimer); setSpeaking(false);
+        clearTimeout(safetyTimer);
+        finalizeSpeechPlayback();
       }
     }
-  }, [suspect]);
+  }, [finalizeSpeechPlayback, startSpeechClock, suspect]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -308,7 +393,7 @@ export default function InterrogationRoom() {
       setDisplayText("");
       speakText(fullResponse);
     } catch {
-      setSpeaking(false);
+      finalizeSpeechPlayback();
       setDisplayText("");
       addMessages(selectedSuspect, [{
         role: "assistant",
@@ -319,7 +404,7 @@ export default function InterrogationRoom() {
       inputRef.current?.focus();
     }
   }, [
-    input,
+      input,
     loading,
     messages,
     selectedSuspect,
@@ -334,6 +419,7 @@ export default function InterrogationRoom() {
     canonicalKillerId,
     backendSessionToken,
     contradictoryEvidence,
+    finalizeSpeechPlayback,
     recordInterrogationTurnOutcome,
     supportiveEvidence,
   ]);
@@ -426,7 +512,11 @@ export default function InterrogationRoom() {
             <InterrogationRoomScene3D
               suspectId={selectedSuspect}
               evidenceIds={discoveredEvidence}
+              speaking={speaking}
               stressed={stressed}
+              characterTimestamps={characterTimestamps}
+              visemeTimeline={visemeTimeline}
+              speechElapsedMs={speechElapsedMs}
             />
           </div>
           <SuspectMetaFooter suspectId={selectedSuspect} stressed={stressed} />
