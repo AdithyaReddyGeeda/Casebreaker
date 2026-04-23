@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Html, useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
@@ -83,52 +83,22 @@ const MOUTH_MORPH_HINTS = [
   "jawopen",
   "jaw_open",
   "aa",
+  "ah",
+  "ee",
   "oh",
+  "oo",
   "ou",
+  "smile",
 ];
 
-const HEAD_MESH_HINTS = [
-  "head",
-  "face",
-  "hair",
-  "brow",
-  "eye",
-  "lash",
-  "teeth",
-  "mouth",
-  "tongue",
+const BLINK_MORPH_HINTS = [
+  "blink",
+  "eyeblink",
+  "eye_blink",
+  "lid",
+  "eyelid",
+  "close",
 ];
-
-function pickMouthMorphIndices(dict: Record<string, number>): number[] {
-  const entries = Object.entries(dict);
-  const matches = entries
-    .filter(([name]) =>
-      MOUTH_MORPH_HINTS.some((hint) => name.toLowerCase().includes(hint))
-    )
-    .map(([, idx]) => idx);
-
-  const uniqueMatches = Array.from(new Set(matches));
-  if (uniqueMatches.length > 0) return uniqueMatches.slice(0, 4);
-
-  return entries.map(([, idx]) => idx).slice(0, 2);
-}
-
-function getAllSpeechMorphIndices(dict: Record<string, number>): number[] {
-  return Array.from(
-    new Set(
-      Object.entries(dict)
-        .filter(([name]) =>
-          MOUTH_MORPH_HINTS.some((hint) => name.toLowerCase().includes(hint))
-        )
-        .map(([, idx]) => idx)
-    )
-  );
-}
-
-function isHeadLikeMesh(name: string) {
-  const lower = name.toLowerCase();
-  return HEAD_MESH_HINTS.some((hint) => lower.includes(hint));
-}
 
 function isBodyAffectingTrack(trackName: string) {
   const name = trackName.toLowerCase();
@@ -176,6 +146,269 @@ function getVisemeMouthInfluence(
   return THREE.MathUtils.clamp((active.strength || 0.9) * 0.9, 0.05, 1);
 }
 
+function getActiveVisemeName(
+  timeline: VisemeTimeline | null | undefined,
+  elapsedMs: number
+): string {
+  if (!timeline?.events.length) return "open";
+
+  let active = timeline.events[0];
+  for (const event of timeline.events) {
+    if (event.timeMs <= elapsedMs) {
+      active = event;
+    } else {
+      break;
+    }
+  }
+
+  return active.viseme?.toLowerCase() || "open";
+}
+
+type FacialMorphTarget = {
+  name: string;
+  index: number;
+};
+
+type MorphLipSyncTarget = {
+  mode: "morph";
+  mesh: THREE.Mesh;
+  meshName: string;
+  morphTargets: FacialMorphTarget[];
+  blinkTargets: FacialMorphTarget[];
+  jawBone: THREE.Bone | null;
+  headBone: THREE.Bone | null;
+  neckBone: THREE.Bone | null;
+  chestBone: THREE.Bone | null;
+};
+
+type JawLipSyncTarget = {
+  mode: "jaw";
+  mesh: null;
+  meshName: null;
+  morphTargets: [];
+  blinkTargets: FacialMorphTarget[];
+  jawBone: THREE.Bone;
+  headBone: THREE.Bone | null;
+  neckBone: THREE.Bone | null;
+  chestBone: THREE.Bone | null;
+};
+
+type HeadLipSyncTarget = {
+  mode: "head";
+  mesh: null;
+  meshName: null;
+  morphTargets: [];
+  blinkTargets: FacialMorphTarget[];
+  jawBone: null;
+  headBone: THREE.Bone;
+  neckBone: THREE.Bone | null;
+  chestBone: THREE.Bone | null;
+};
+
+type EmptyLipSyncTarget = {
+  mode: "none";
+  mesh: null;
+  meshName: null;
+  morphTargets: [];
+  blinkTargets: FacialMorphTarget[];
+  jawBone: null;
+  headBone: null;
+  neckBone: null;
+  chestBone: null;
+};
+
+type LipSyncTarget = MorphLipSyncTarget | JawLipSyncTarget | HeadLipSyncTarget | EmptyLipSyncTarget;
+
+function findFacialMorphTargets(dict: Record<string, number>): FacialMorphTarget[] {
+  return Object.entries(dict)
+    .filter(([name]) => {
+      const lower = name.toLowerCase();
+      return MOUTH_MORPH_HINTS.some((hint) => lower.includes(hint));
+    })
+    .map(([name, index]) => ({ name, index }));
+}
+
+function findBlinkMorphTargets(dict: Record<string, number>): FacialMorphTarget[] {
+  return Object.entries(dict)
+    .filter(([name]) => {
+      const lower = name.toLowerCase();
+      return BLINK_MORPH_HINTS.some((hint) => lower.includes(hint));
+    })
+    .map(([name, index]) => ({ name, index }));
+}
+
+function findBestMorphTarget(targets: FacialMorphTarget[], cue: string): FacialMorphTarget {
+  const lowerCue = cue.toLowerCase();
+  const direct = targets.find((target) => target.name.toLowerCase().includes(lowerCue));
+  if (direct) return direct;
+
+  const open =
+    targets.find((target) => /open|jaw|mouth|viseme|aa|ah/i.test(target.name)) ?? targets[0];
+
+  return open;
+}
+
+function resolveLipSyncTarget(root: THREE.Group): LipSyncTarget {
+  const morphCandidates: MorphLipSyncTarget[] = [];
+  let jawBone: THREE.Bone | null = null;
+  let headBone: THREE.Bone | null = null;
+  let neckBone: THREE.Bone | null = null;
+  let chestBone: THREE.Bone | null = null;
+  const blinkTargets: FacialMorphTarget[] = [];
+  const relevantBones: string[] = [];
+  const meshDebug: Array<{
+    meshName: string;
+    hasMorphTargetInfluences: boolean;
+    morphTargetKeys: string[];
+  }> = [];
+
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    const bone = obj as THREE.Bone;
+
+    if ("isMesh" in obj && obj.isMesh) {
+      const morphTargetKeys = mesh.morphTargetDictionary
+        ? Object.keys(mesh.morphTargetDictionary)
+        : [];
+      const hasMorphTargetInfluences = Array.isArray(mesh.morphTargetInfluences);
+      meshDebug.push({
+        meshName: mesh.name || "unnamed-mesh",
+        hasMorphTargetInfluences,
+        morphTargetKeys,
+      });
+
+      if (mesh.morphTargetDictionary && hasMorphTargetInfluences) {
+        const morphTargets = findFacialMorphTargets(mesh.morphTargetDictionary);
+        const meshBlinkTargets = findBlinkMorphTargets(mesh.morphTargetDictionary);
+        if (meshBlinkTargets.length > 0 && blinkTargets.length === 0) {
+          blinkTargets.push(...meshBlinkTargets);
+        }
+        if (morphTargets.length > 0) {
+          morphCandidates.push({
+            mode: "morph",
+            mesh,
+            meshName: mesh.name || "unnamed-morph-mesh",
+            morphTargets,
+            blinkTargets: meshBlinkTargets,
+            jawBone: null,
+            headBone: null,
+            neckBone: null,
+            chestBone: null,
+          });
+        }
+      }
+    }
+
+    if (bone.isBone) {
+      const lower = bone.name.toLowerCase();
+      if (/(head|neck|jaw|mandible|face|chest|spine|hips|pelvis|root)/.test(lower)) {
+        relevantBones.push(bone.name || "unnamed-bone");
+      }
+
+      if (!jawBone && /(jaw|mandible)/i.test(bone.name)) {
+        jawBone = bone;
+      }
+
+      if (!headBone && /(head|neck)/i.test(bone.name)) {
+        headBone = bone;
+      }
+
+      if (!neckBone && /neck/i.test(bone.name)) {
+        neckBone = bone;
+      }
+
+      if (!chestBone && /(chest|upper.*spine|spine2|spine_02|spine02)/i.test(bone.name)) {
+        chestBone = bone;
+      }
+    }
+  });
+
+  const selectedMorph = morphCandidates
+    .sort((a, b) => b.morphTargets.length - a.morphTargets.length)[0];
+
+  let target: LipSyncTarget;
+  if (selectedMorph) {
+    target = {
+      ...selectedMorph,
+      blinkTargets: selectedMorph.blinkTargets.length > 0 ? selectedMorph.blinkTargets : blinkTargets,
+      jawBone,
+      headBone,
+      neckBone,
+      chestBone,
+    };
+  } else if (jawBone) {
+    target = {
+      mode: "jaw",
+      mesh: null,
+      meshName: null,
+      morphTargets: [],
+      blinkTargets,
+      jawBone,
+      headBone,
+      neckBone,
+      chestBone,
+    };
+  } else if (headBone) {
+    target = {
+      mode: "head",
+      mesh: null,
+      meshName: null,
+      morphTargets: [],
+      blinkTargets,
+      jawBone: null,
+      headBone,
+      neckBone,
+      chestBone,
+    };
+  } else {
+    target = {
+      mode: "none",
+      mesh: null,
+      meshName: null,
+      morphTargets: [],
+      blinkTargets,
+      jawBone: null,
+      headBone: null,
+      neckBone: null,
+      chestBone: null,
+    };
+  }
+
+  debugFaceAnimation("rig-structure", {
+    meshes: meshDebug,
+    relevantBones,
+  });
+
+  debugFaceAnimation("selected-lip-sync-target", {
+    mode: target.mode,
+    meshName: target.meshName,
+    morphTargetNames: target.morphTargets.map((item) => item.name),
+    blinkTargetNames: target.blinkTargets.map((item) => item.name),
+    jawBone: target.jawBone?.name ?? null,
+    headBone: target.headBone?.name ?? null,
+    neckBone: target.neckBone?.name ?? null,
+    chestBone: target.chestBone?.name ?? null,
+  });
+
+  if (target.mode === "none") {
+    console.warn("No facial morph targets or jaw/head bones found for lip-sync");
+    debugFaceAnimation("fallback-speaking-indicator-active", {
+      mode: "none",
+      reason: "No usable facial rig. Body animation disabled; using indicator only.",
+    });
+  } else {
+    debugFaceAnimation("fallback-speaking-motion-capabilities", {
+      mode: target.mode,
+      headMotion: Boolean(target.headBone),
+      neckMotion: Boolean(target.neckBone),
+      chestMotion: Boolean(target.chestBone),
+      blinkMotion: target.blinkTargets.length > 0,
+    });
+  }
+
+  return target;
+}
+
 function getModelYaw(url: string): number {
   const lower = url.toLowerCase();
   if (lower.includes("soldier")) return Math.PI;
@@ -184,16 +417,20 @@ function getModelYaw(url: string): number {
 
 function GLBCharacter({
   url,
+  speaking,
   speakingRef,
   stressedRef,
   targetMouthInfluenceRef,
+  activeVisemeRef,
   preferredYaw,
   presentation = "standing",
 }: {
   url: string;
+  speaking: boolean;
   speakingRef: MutableRefObject<boolean>;
   stressedRef: MutableRefObject<boolean>;
   targetMouthInfluenceRef: MutableRefObject<number>;
+  activeVisemeRef: MutableRefObject<string>;
   preferredYaw?: number;
   presentation?: "standing" | "seated";
 }) {
@@ -209,10 +446,21 @@ function GLBCharacter({
   const headBoneRef = useRef<THREE.Bone | null>(null);
   const headInitialXRef = useRef(0);
   const headInitialYRef = useRef(0);
-  const mouthMorphTargetsRef = useRef<
-    Array<{ mesh: THREE.Mesh; activeIndex: number; allIndices: number[]; meshName: string }>
-  >([]);
-  const hasLipRigRef = useRef(false);
+  const neckBoneRef = useRef<THREE.Bone | null>(null);
+  const neckInitialXRef = useRef(0);
+  const chestBoneRef = useRef<THREE.Bone | null>(null);
+  const chestInitialXRef = useRef(0);
+  const lipSyncTargetRef = useRef<LipSyncTarget>({
+    mode: "none",
+    mesh: null,
+    meshName: null,
+    morphTargets: [],
+    blinkTargets: [],
+    jawBone: null,
+    headBone: null,
+    neckBone: null,
+    chestBone: null,
+  });
   const clockRef = useRef(0);
   const finalScaleRef = useRef(1);
   const finalYOffsetRef = useRef(0);
@@ -223,6 +471,7 @@ function GLBCharacter({
   const seatedLeanRef = useRef(0);
   const groundBoxRef = useRef(new THREE.Box3());
   const groundSizeRef = useRef(new THREE.Vector3());
+  const [lipSyncMode, setLipSyncMode] = useState<LipSyncTarget["mode"]>("none");
 
   useEffect(() => {
     const group = groupRef.current;
@@ -231,27 +480,14 @@ function GLBCharacter({
     hipsBoneRef.current = null;
     jawBoneRef.current = null;
     headBoneRef.current = null;
-    mouthMorphTargetsRef.current = [];
-    hasLipRigRef.current = false;
+    neckBoneRef.current = null;
+    chestBoneRef.current = null;
 
     clonedScene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
       const bone = obj as THREE.Bone;
 
       if ("isMesh" in obj && obj.isMesh) {
-        mesh.frustumCulled = false;
-        if (mesh.morphTargetDictionary && mesh.morphTargetInfluences) {
-          const mouthIndices = pickMouthMorphIndices(mesh.morphTargetDictionary);
-          const allSpeechIndices = getAllSpeechMorphIndices(mesh.morphTargetDictionary);
-          if (mouthIndices.length > 0 && allSpeechIndices.length > 0) {
-            mouthMorphTargetsRef.current.push({
-              mesh,
-              activeIndex: mouthIndices[0],
-              allIndices: allSpeechIndices,
-              meshName: mesh.name || "unnamed-morph-mesh",
-            });
-          }
-        }
+        (obj as THREE.Mesh).frustumCulled = false;
       }
 
       if (bone.isBone && /hips/i.test(bone.name) && !hipsBoneRef.current) {
@@ -272,8 +508,30 @@ function GLBCharacter({
       }
     });
 
-    hasLipRigRef.current =
-      mouthMorphTargetsRef.current.length > 0 || Boolean(jawBoneRef.current);
+    const lipSyncTarget = resolveLipSyncTarget(clonedScene);
+    lipSyncTargetRef.current = lipSyncTarget;
+    setLipSyncMode(lipSyncTarget.mode);
+    jawBoneRef.current = lipSyncTarget.jawBone;
+    headBoneRef.current = lipSyncTarget.headBone;
+    neckBoneRef.current = lipSyncTarget.neckBone;
+    chestBoneRef.current = lipSyncTarget.chestBone;
+
+    if (jawBoneRef.current) {
+      jawInitialXRef.current = jawBoneRef.current.rotation.x;
+    }
+
+    if (headBoneRef.current) {
+      headInitialXRef.current = headBoneRef.current.rotation.x;
+      headInitialYRef.current = headBoneRef.current.rotation.y;
+    }
+
+    if (neckBoneRef.current) {
+      neckInitialXRef.current = neckBoneRef.current.rotation.x;
+    }
+
+    if (chestBoneRef.current) {
+      chestInitialXRef.current = chestBoneRef.current.rotation.x;
+    }
 
     clonedScene.updateWorldMatrix(true, true);
 
@@ -368,32 +626,6 @@ function GLBCharacter({
       }
     }
 
-    const debugJawBoneName = jawBoneRef.current
-      ? (jawBoneRef.current as THREE.Bone).name
-      : null;
-    const debugHeadBoneName = headBoneRef.current
-      ? (headBoneRef.current as THREE.Bone).name
-      : null;
-
-    debugFaceAnimation("resolved-face-animation-targets", {
-      url,
-      morphMeshes: mouthMorphTargetsRef.current.map((entry) => ({
-        meshName: entry.meshName,
-        activeIndex: entry.activeIndex,
-        allIndices: entry.allIndices,
-      })),
-      jawBone: debugJawBoneName,
-      headBone: debugHeadBoneName,
-      fallbackMode:
-        mouthMorphTargetsRef.current.length > 0
-          ? "morphTargets"
-          : jawBoneRef.current
-            ? "jawBone"
-            : headBoneRef.current
-              ? "headBone"
-              : "none",
-    });
-
     return () => {
       mixerRef.current?.stopAllAction();
       mixerRef.current = null;
@@ -421,23 +653,68 @@ function GLBCharacter({
       ? THREE.MathUtils.clamp(targetMouthInfluenceRef.current, 0, 1)
       : 0;
 
-    if (mouthMorphTargetsRef.current.length > 0) {
-      for (const entry of mouthMorphTargetsRef.current) {
-        const influences = entry.mesh.morphTargetInfluences;
-        if (!Array.isArray(influences)) continue;
-        for (const idx of entry.allIndices) {
-          const current = influences[idx] ?? 0;
-          const targetValue = idx === entry.activeIndex ? mouthTarget : 0;
-          Reflect.set(influences, idx, THREE.MathUtils.lerp(current, targetValue, 0.28));
+    const lipSyncTarget = lipSyncTargetRef.current;
+
+    if (lipSyncTarget.mode === "morph") {
+      const influences = lipSyncTarget.mesh.morphTargetInfluences;
+      if (Array.isArray(influences)) {
+        const activeTarget = findBestMorphTarget(
+          lipSyncTarget.morphTargets,
+          activeVisemeRef.current
+        );
+        for (const target of lipSyncTarget.morphTargets) {
+          const current = influences[target.index] ?? 0;
+          const targetValue = speakingRef.current && target.index === activeTarget.index
+            ? THREE.MathUtils.clamp(mouthTarget, 0.15, 1)
+            : 0;
+          Reflect.set(
+            influences,
+            target.index,
+            THREE.MathUtils.lerp(current, targetValue, 0.32)
+          );
+        }
+
+        const blinkPhase = t % 4.8;
+        const blinkAmount =
+          speakingRef.current && blinkPhase < 0.14
+            ? Math.sin((blinkPhase / 0.14) * Math.PI)
+            : 0;
+        for (const target of lipSyncTarget.blinkTargets) {
+          const current = influences[target.index] ?? 0;
+          Reflect.set(
+            influences,
+            target.index,
+            THREE.MathUtils.lerp(current, blinkAmount, 0.35)
+          );
+        }
+
+        if (speakingRef.current && Math.floor(t * 4) % 12 === 0) {
+          debugFaceAnimation("active-mouth-cue", {
+            mode: lipSyncTarget.mode,
+            meshName: lipSyncTarget.meshName,
+            activeMorphTarget: activeTarget.name,
+            activeViseme: activeVisemeRef.current,
+            mouthTarget,
+          });
         }
       }
-    } else if (jawBoneRef.current) {
+    } else if (lipSyncTarget.mode === "jaw") {
       const jawTarget = speakingRef.current ? mouthTarget * 0.35 : 0;
-      jawBoneRef.current.rotation.x = THREE.MathUtils.lerp(
-        jawBoneRef.current.rotation.x,
-        THREE.MathUtils.clamp(jawInitialXRef.current - jawTarget, -0.1, 0.1),
+      lipSyncTarget.jawBone.rotation.x = THREE.MathUtils.lerp(
+        lipSyncTarget.jawBone.rotation.x,
+        THREE.MathUtils.clamp(jawInitialXRef.current + jawTarget, 0, 0.18),
         0.28
       );
+
+      if (speakingRef.current && Math.floor(t * 4) % 12 === 0) {
+        debugFaceAnimation("active-mouth-cue", {
+          mode: lipSyncTarget.mode,
+          jawBone: lipSyncTarget.jawBone.name,
+          jawRotationX: lipSyncTarget.jawBone.rotation.x,
+          activeViseme: activeVisemeRef.current,
+          mouthTarget,
+        });
+      }
     }
 
     if (speakingRef.current) {
@@ -445,25 +722,50 @@ function GLBCharacter({
       groupRef.current.rotation.y = 0;
       groupRef.current.rotation.x = seatedLeanRef.current;
 
-      if (headBoneRef.current) {
-        const pulse = 0.35 + Math.abs(Math.sin(t * 10.2));
-        headBoneRef.current.rotation.x = THREE.MathUtils.lerp(
-          headBoneRef.current.rotation.x,
+      if (lipSyncTarget.headBone) {
+        const speechPulse = Math.max(0.25, mouthTarget);
+        const pulse = speechPulse * (0.35 + Math.abs(Math.sin(t * 10.2)));
+        lipSyncTarget.headBone.rotation.x = THREE.MathUtils.lerp(
+          lipSyncTarget.headBone.rotation.x,
           THREE.MathUtils.clamp(
-            headInitialXRef.current + Math.sin(t * 11.5) * (0.03 * pulse),
-            -0.1,
-            0.1
+            headInitialXRef.current + Math.sin(t * 11.5) * (0.018 * pulse),
+            headInitialXRef.current - 0.02,
+            headInitialXRef.current + 0.04
           ),
           0.32
         );
-        headBoneRef.current.rotation.y = THREE.MathUtils.lerp(
-          headBoneRef.current.rotation.y,
+        lipSyncTarget.headBone.rotation.y = THREE.MathUtils.lerp(
+          lipSyncTarget.headBone.rotation.y,
           THREE.MathUtils.clamp(
-            headInitialYRef.current + Math.sin(t * 6.2) * 0.02,
-            -0.1,
-            0.1
+            headInitialYRef.current + Math.sin(t * 6.2) * (0.012 * speechPulse),
+            headInitialYRef.current - 0.015,
+            headInitialYRef.current + 0.015
           ),
-          0.3
+          0.25
+        );
+      }
+
+      if (lipSyncTarget.neckBone) {
+        lipSyncTarget.neckBone.rotation.x = THREE.MathUtils.lerp(
+          lipSyncTarget.neckBone.rotation.x,
+          THREE.MathUtils.clamp(
+            neckInitialXRef.current + Math.sin(t * 3.1) * 0.006,
+            neckInitialXRef.current - 0.01,
+            neckInitialXRef.current + 0.01
+          ),
+          0.18
+        );
+      }
+
+      if (lipSyncTarget.chestBone) {
+        lipSyncTarget.chestBone.rotation.x = THREE.MathUtils.lerp(
+          lipSyncTarget.chestBone.rotation.x,
+          THREE.MathUtils.clamp(
+            chestInitialXRef.current + Math.sin(t * 2.2) * 0.0035,
+            chestInitialXRef.current - 0.006,
+            chestInitialXRef.current + 0.006
+          ),
+          0.14
         );
       }
     } else if (stressedRef.current) {
@@ -487,6 +789,20 @@ function GLBCharacter({
           headBoneRef.current.rotation.y,
           headInitialYRef.current,
           0.16
+        );
+      }
+      if (neckBoneRef.current) {
+        neckBoneRef.current.rotation.x = THREE.MathUtils.lerp(
+          neckBoneRef.current.rotation.x,
+          neckInitialXRef.current,
+          0.14
+        );
+      }
+      if (chestBoneRef.current) {
+        chestBoneRef.current.rotation.x = THREE.MathUtils.lerp(
+          chestBoneRef.current.rotation.x,
+          chestInitialXRef.current,
+          0.12
         );
       }
     }
@@ -514,6 +830,39 @@ function GLBCharacter({
   return (
     <group ref={groupRef}>
       <primitive object={clonedScene} />
+      {speaking && lipSyncMode === "none" && (
+        <Html position={[0, TARGET_HEIGHT + 0.16, 0]} center>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 7px",
+              border: "1px solid rgba(212,168,67,0.35)",
+              borderRadius: 999,
+              background: "rgba(7,14,26,0.76)",
+              color: "#D4A843",
+              fontSize: 9,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              pointerEvents: "none",
+              userSelect: "none",
+              boxShadow: "0 0 14px rgba(212,168,67,0.12)",
+            }}
+          >
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "#D4A843",
+                animation: "pulse 0.85s ease-in-out infinite",
+              }}
+            />
+            Speaking
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -522,9 +871,11 @@ const StableGLBModel = memo(
   GLBCharacter,
   (prev, next) =>
     prev.url === next.url &&
+    prev.speaking === next.speaking &&
     prev.speakingRef === next.speakingRef &&
     prev.stressedRef === next.stressedRef &&
-    prev.targetMouthInfluenceRef === next.targetMouthInfluenceRef
+    prev.targetMouthInfluenceRef === next.targetMouthInfluenceRef &&
+    prev.activeVisemeRef === next.activeVisemeRef
 );
 
 export default function CharacterCanvas({
@@ -541,6 +892,7 @@ export default function CharacterCanvas({
   const speakingRef = useRef(speaking);
   const stressedRef = useRef(stressed);
   const targetMouthInfluenceRef = useRef(0);
+  const activeVisemeRef = useRef("open");
 
   useEffect(() => {
     speakingRef.current = speaking;
@@ -550,12 +902,14 @@ export default function CharacterCanvas({
   useEffect(() => {
     if (!speaking) {
       targetMouthInfluenceRef.current = 0;
+      activeVisemeRef.current = "open";
       return;
     }
 
     const influence = getTimestampMouthInfluence(characterTimestamps, speechElapsedMs);
     targetMouthInfluenceRef.current =
       influence ?? getVisemeMouthInfluence(visemeTimeline, speechElapsedMs) ?? 0;
+    activeVisemeRef.current = getActiveVisemeName(visemeTimeline, speechElapsedMs);
   }, [characterTimestamps, speechElapsedMs, speaking, visemeTimeline]);
 
   useEffect(() => {
@@ -571,9 +925,11 @@ export default function CharacterCanvas({
     <group>
       <StableGLBModel
         url={modelPath.trim()}
+        speaking={speaking}
         speakingRef={speakingRef}
         stressedRef={stressedRef}
         targetMouthInfluenceRef={targetMouthInfluenceRef}
+        activeVisemeRef={activeVisemeRef}
         preferredYaw={preferredYaw}
         presentation={presentation}
       />

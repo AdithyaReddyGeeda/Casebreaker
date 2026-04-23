@@ -56,11 +56,13 @@ export default function EvidenceImageBootstrapper() {
         evidenceId: item.id,
         prompt,
       })
-        .then(({ imageUrl, cached: fromServerCache }) => {
+        .then(({ imageUrl, cached: fromServerCache, provider, model }) => {
           console.log("[evidence-images] ready", {
             caseId,
             evidenceId: item.id,
             fromServerCache,
+            provider,
+            model,
           });
 
           writeEvidenceImageCache({

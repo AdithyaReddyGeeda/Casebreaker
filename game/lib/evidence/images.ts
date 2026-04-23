@@ -117,7 +117,7 @@ export async function requestEvidenceImageGeneration(input: {
   caseId: string;
   evidenceId: string;
   prompt: string;
-}): Promise<{ imageUrl: string; cached: boolean }> {
+}): Promise<{ imageUrl: string; cached: boolean; provider?: string; model?: string }> {
   const response = await fetch("/api/evidence/generate-image", {
     method: "POST",
     headers: {
@@ -129,6 +129,8 @@ export async function requestEvidenceImageGeneration(input: {
   const payload = (await response.json()) as {
     error?: string;
     imageUrl?: string;
+    provider?: string;
+    model?: string;
     cached?: boolean;
   };
 
@@ -139,5 +141,7 @@ export async function requestEvidenceImageGeneration(input: {
   return {
     imageUrl: payload.imageUrl,
     cached: Boolean(payload.cached),
+    provider: payload.provider,
+    model: payload.model,
   };
 }

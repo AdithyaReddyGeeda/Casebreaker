@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useGameStore } from "@/lib/store";
 import { interrogateSuspect, synthesizeSpeech } from "@/lib/investigation";
 import {
@@ -80,6 +80,11 @@ export default function InterrogationRoom() {
   );
   const [visemeTimeline, setVisemeTimeline] = useState<VisemeTimeline | null>(null);
   const [speechElapsedMs, setSpeechElapsedMs] = useState(0);
+  const [spokenSubtitle, setSpokenSubtitle] = useState<{
+    speaker: string;
+    text: string;
+    durationMs: number;
+  } | null>(null);
   const [contextFollowUps, setContextFollowUps] = useState<string[]>([]);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +166,7 @@ export default function InterrogationRoom() {
     stopSpeechClock();
     audioRef.current = null;
     setSpeaking(false);
+    setSpokenSubtitle(null);
   }, [stopSpeechClock]);
 
   useEffect(() => {
@@ -274,6 +280,11 @@ export default function InterrogationRoom() {
       text,
       fallbackTimeline.durationMs
     );
+    setSpokenSubtitle({
+      speaker: suspect.name,
+      text,
+      durationMs: Math.max(1600, Math.min(12000, fallbackTimeline.durationMs)),
+    });
     const safetyTimer = setTimeout(() => finalizeSpeechPlayback(), Math.max(8000, text.length * 80));
     try {
       const out = await synthesizeSpeech({ text, voiceId: suspect.voiceId });
@@ -340,7 +351,7 @@ export default function InterrogationRoom() {
             : contradictoryEvidence.length > 0
               ? `\n\n[Detective note: The player is confronting the suspect with ${contradictoryEvidence
                   .map((item) => item.title)
-                  .join(", ")}. These exhibits contradict the suspect's story, so the reply should feel more defensive, pressured, or inconsistent.]`
+                  .join(", ")}. These exhibits contradict the suspect's story. Let the pressure show immediately: sharper defensiveness, hesitation, over-explanation, or a small inconsistency.]`
               : supportiveEvidence.length > 0
                 ? `\n\n[Detective note: The player is referencing ${supportiveEvidence
                     .map((item) => item.title)
@@ -439,6 +450,17 @@ export default function InterrogationRoom() {
       ? [...(INTERROGATION_STRESS_FOLLOWUP_QUESTIONS[selectedSuspect] ?? [])]
       : [];
   const bottomStressHint = interrogationBottomStressHint(stress);
+  const revealedSubtitle = useMemo(() => {
+    if (!spokenSubtitle) return "";
+    const rawProgress =
+      spokenSubtitle.durationMs > 0 ? Math.min(1, speechElapsedMs / spokenSubtitle.durationMs) : 1;
+    const easedProgress = 1 - Math.pow(1 - rawProgress, 1.8);
+    const visibleChars = Math.min(
+      spokenSubtitle.text.length,
+      Math.max(speaking ? 1 : 0, Math.ceil(spokenSubtitle.text.length * easedProgress))
+    );
+    return spokenSubtitle.text.slice(0, visibleChars);
+  }, [spokenSubtitle, speechElapsedMs, speaking]);
 
   /** Prefer AI chips (opening + transcript); static only if API empty/offline. */
   const mergedSuggestionChips = useMemo(() => {
@@ -503,9 +525,11 @@ export default function InterrogationRoom() {
           <div
             className="pointer-events-none absolute inset-0 z-[1]"
             style={{
-              background: stressed
-                ? "radial-gradient(ellipse at 50% 25%, rgba(200,80,40,.12) 0%, transparent 55%)"
-                : "radial-gradient(ellipse at 50% 25%, rgba(255,248,200,.06) 0%, transparent 55%)",
+              background: speaking
+                ? "radial-gradient(ellipse at 50% 30%, rgba(212,168,67,.14) 0%, transparent 48%), radial-gradient(ellipse at 50% 80%, rgba(0,0,0,.28) 0%, transparent 55%)"
+                : stressed
+                  ? "radial-gradient(ellipse at 50% 25%, rgba(200,80,40,.12) 0%, transparent 55%)"
+                  : "radial-gradient(ellipse at 50% 25%, rgba(255,248,200,.06) 0%, transparent 55%)",
             }}
           />
           <div className="relative z-0 min-h-0 flex-1">
@@ -519,17 +543,61 @@ export default function InterrogationRoom() {
               speechElapsedMs={speechElapsedMs}
             />
           </div>
+          <AnimatePresence>
+            {spokenSubtitle && (
+              <motion.div
+                className="pointer-events-none absolute left-4 right-4 bottom-[76px] z-20 rounded-lg border border-[#D4A843]/25 bg-[#050A12]/90 px-3 py-2 shadow-[0_18px_50px_rgba(0,0,0,.45)] backdrop-blur-sm"
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                transition={{ duration: 0.22 }}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <div className="text-[9px] uppercase tracking-[2.4px] text-[#D4A843]">
+                    {spokenSubtitle.speaker}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[8px] uppercase tracking-[1.6px] text-[#6F7E91]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#D4A843] shadow-[0_0_10px_rgba(212,168,67,.75)]" />
+                    Live Statement
+                  </div>
+                </div>
+                <p
+                  className="min-h-[32px] text-[11px] leading-relaxed text-[#DDE4EE]"
+                  style={{ fontFamily: "Georgia, serif" }}
+                >
+                  {revealedSubtitle}
+                  {speaking && (
+                    <span
+                      className="ml-0.5 inline-block h-3 w-px align-middle bg-[#DDE4EE]"
+                      style={{ animation: "blink .8s step-end infinite" }}
+                    />
+                  )}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <SuspectMetaFooter suspectId={selectedSuspect} stressed={stressed} />
           {speaking && (
-            <div className="absolute top-4 right-4 z-20 flex gap-1 items-end">
-              {[4, 7, 5, 8, 4].map((h, i) => (
-                <div
-                  key={i}
-                  className="w-0.5 rounded-full bg-[#D4A843]"
-                  style={{ height: h, animation: `bounce ${0.4 + i * 0.1}s ease-in-out infinite alternate` }}
-                />
-              ))}
-            </div>
+            <motion.div
+              className="absolute top-4 right-4 z-20 flex items-center gap-2 rounded-full border border-[#D4A843]/30 bg-[#050A12]/85 px-2.5 py-1.5 shadow-[0_0_22px_rgba(212,168,67,.18)] backdrop-blur-sm"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div className="flex h-3 items-end gap-0.5">
+                {[4, 8, 5, 10, 6].map((h, i) => (
+                  <div
+                    key={i}
+                    className="w-0.5 rounded-full bg-[#D4A843]"
+                    style={{ height: h, animation: `bounce ${0.36 + i * 0.08}s ease-in-out infinite alternate` }}
+                  />
+                ))}
+              </div>
+              <span className="text-[8px] uppercase tracking-[1.8px] text-[#D4A843]">
+                Speaking
+              </span>
+            </motion.div>
           )}
         </div>
 
@@ -541,8 +609,8 @@ export default function InterrogationRoom() {
               {contradictoryEvidence.length > 0 && (
                 <div className="rounded-md border border-[#5B3B30] bg-[#2A1715] px-3 py-2 text-[10px] leading-relaxed tracking-[0.02em] text-[#D9A08E]">
                   {hasInterrogationMessages
-                    ? "Loaded evidence contradicts what they’ve said in this interview."
-                    : "Loaded evidence cuts against this suspect’s story in the case file. Press them once the conversation starts."}
+                    ? "Pressure point active: selected evidence directly contradicts this suspect. Their next answer should sound more defensive."
+                    : "Pressure point ready: selected evidence conflicts with this suspect’s case-file story. Start the interview, then press the inconsistency."}
                 </div>
               )}
 

@@ -38,16 +38,16 @@ function InterrogationRoomScene({
       <directionalLight
         castShadow
         position={[0.55, 1.95, 1.35]}
-        intensity={1.55}
+        intensity={speaking ? 1.72 : 1.55}
         color="#f2ece2"
       />
-      <pointLight position={[0, 1.38, 1.02]} intensity={1.1} color="#f5efe4" />
+      <pointLight position={[0, 1.38, 1.02]} intensity={speaking ? 1.34 : 1.1} color="#f5efe4" />
       <pointLight position={[-0.55, 1.22, 0.6]} intensity={stressed ? 0.42 : 0.18} color={accent} />
       <spotLight
         position={[0.1, 2.0, 1.55]}
         angle={0.34}
         penumbra={0.95}
-        intensity={2.3}
+        intensity={speaking ? 2.62 : 2.3}
         color="#fff7ec"
         distance={5}
         decay={1.4}
